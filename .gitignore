@@ -1,0 +1,371 @@
+# ============================================================
+# .gitignore — Git 忽略文件配置
+# 版本：V8.1-Fixed
+# 说明：指定不需要版本控制的文件和目录
+# ============================================================
+#
+# 【审查与修复记录】
+# ──────────────────────────────────────────────────────────────
+# 问题 #1：未忽略 Python 字节码缓存 __pycache__ 和 .pyc
+#   └── 修复：添加 __pycache__/ 和 *.pyc
+#
+# 问题 #2：未忽略 CMake 构建目录 build/
+#   └── 修复：添加 build/ 和 cmake-build-*/
+#
+# 问题 #3：未忽略前端 node_modules/ 和构建输出
+#   └── 修复：添加 node_modules/、dist/、build/（前端）
+#
+# 问题 #4：未忽略敏感环境变量文件 .env
+#   └── 修复：添加 .env、.env.local、.env.*.local
+#
+# 问题 #5：未忽略日志目录 logs/ 和数据目录 data/（运行时生成）
+#   └── 修复：添加 logs/、data/（但保留 data/.gitkeep）
+#
+# 问题 #6：未忽略 IDE 配置（.vscode、.idea、*.swp）
+#   └── 修复：添加相关忽略
+#
+# 问题 #7：未忽略操作系统临时文件（.DS_Store、Thumbs.db）
+#   └── 修复：添加 .DS_Store 和 Thumbs.db
+#
+# 问题 #8：未忽略测试覆盖率报告（coverage/、htmlcov/）
+#   └── 修复：添加相关目录
+#
+# 问题 #9：未忽略虚拟环境（venv/、env/、.venv/）
+#   └── 修复：添加虚拟环境目录
+# ──────────────────────────────────────────────────────────────
+# 兼容性：Git 2.0+ 完全兼容
+# ============================================================
+
+
+# ============================================================
+# 操作系统/编辑器/IDE 临时文件
+# ============================================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*.swp
+*.swo
+*~
+*.tmp
+*.bak
+*.orig
+
+# Vim
+*.un~
+*.swp
+*.swo
+
+# Visual Studio Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.history/
+
+# IntelliJ IDEA / PyCharm / CLion
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+.idea_modules/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Eclipse
+.project
+.classpath
+.settings/
+*.launch
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+
+
+# ============================================================
+# 编译产物（C++ / CMake）
+# ============================================================
+
+# CMake 构建目录
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+!*.cmake.in
+
+# C++ 编译产物
+*.o
+*.obj
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.out
+*.pdb
+*.ilk
+*.exp
+
+# 测试/性能产物
+*.gcda
+*.gcno
+*.gcov
+
+
+# ============================================================
+# Python
+# ============================================================
+
+# Python 字节码缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Python 虚拟环境
+venv/
+env/
+.venv/
+.env/
+virtualenv/
+pyenv/
+.venv.bak/
+
+# Python 构建产物
+dist/
+build/
+lib/
+lib64/
+*.egg-info/
+*.egg
+.eggs/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Python 测试覆盖率
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+.pytest_cache/
+.tox/
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Python 类型检查
+*.pyi.bak
+*.pyi.orig
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+
+# ============================================================
+# 前端（Node.js / React / TypeScript）
+# ============================================================
+
+# Node.js 依赖
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# 前端构建产物
+dist/
+build/          # 注意：如果使用 Create React App，build/ 是输出目录
+.parcel-cache/
+.next/
+out/
+_gh_pages/
+.eslintcache
+
+# 前端环境变量（本地开发）
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 打包文件
+*.tgz
+*.tar.gz
+*.tar.bz2
+*.rar
+
+
+# ============================================================
+# 配置文件（敏感/本地）
+# ============================================================
+
+# 环境变量（包含密钥等敏感信息）—— 必须忽略！
+.env
+.env.local
+.env.*.local
+*.secret
+*.key
+*.pem
+*.crt
+
+# 配置文件中的本地覆盖
+config/local.yaml
+config/dev.yaml
+config/secrets.yaml
+
+
+# ============================================================
+# 数据/日志/运行时生成文件
+# ============================================================
+
+# 日志文件
+logs/
+*.log
+*.log.*
+logfile-*.txt
+
+# 数据文件（回测、快照、历史数据等）
+data/
+!data/.gitkeep
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# 回测输出
+backtest_results/
+backtest_reports/
+*.backtest.csv
+
+# 缓存
+cache/
+*.cache
+*.cached
+
+
+# ============================================================
+# 文档/临时文件
+# ============================================================
+
+# 临时文档
+*.tmp
+*.temp
+*.draft
+*.bak
+*.orig
+
+# 图表图片（如果由代码生成）
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.svg
+*.pdf
+*.eps
+
+# 导出文件
+*.xlsx
+*.xls
+*.csv
+
+# 压缩包
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+
+
+# ============================================================
+# CI/CD 相关
+# ============================================================
+
+# Jenkins
+.jenkins/
+*.jenkins
+
+# GitHub Actions
+*.github/*.tmp
+
+# Travis CI
+.travis.yml.backup
+
+# GitLab CI
+.gitlab-ci.yml.backup
+
+
+# ============================================================
+# 特定于本项目的忽略
+# ============================================================
+
+# 交易所 API 密钥备份（如果有）
+api_keys/
+*.apikey
+
+# 策略优化结果
+optimization_results/
+*.opt.json
+
+# 自定义策略缓存
+*.strategy_cache
+
+
+# ============================================================
+# 例外规则（不忽略的文件/目录）
+# ============================================================
+
+# 确保这些文件被版本控制（不会忽略）
+!.gitattributes
+!.gitignore
+!.clang-format
+!.prettierrc
+!.env.example
+!config/*.yaml
+!config/*.yml
+!backend/src/core/constants.h
+!backend/src/core/version.h
+
+# 保留 data 目录结构（但忽略内容）
+!data/.gitkeep
+
+# 保留 logs 目录结构（但忽略内容）
+!logs/.gitkeep
+
+
+# ============================================================
+# 配置结束
+# ============================================================
+#
+# 验证命令：
+#   git check-ignore -v path/to/file   # 查看为什么文件被忽略
+#   git status --ignored               # 查看所有被忽略的文件
+#   git add -f path/to/file            # 强制添加被忽略的文件
+# ============================================================

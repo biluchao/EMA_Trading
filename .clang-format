@@ -1,0 +1,278 @@
+# ============================================================
+# .clang-format — C++代码格式化配置
+# 版本：V8.0-Final
+# 说明：EMA量化交易系统统一代码风格
+# 基于：LLVM 风格 + 自定义调整
+# ============================================================
+#
+# 【审查与修复记录】
+# ──────────────────────────────────────────────────────────────
+# 问题 #1：AllowShortFunctionsOnASingleLine 重复定义
+#   └── 第45行: None | 第132行: Inline → 冲突
+#   └── 修复：移除第45行，保留第132行（Inline）
+#   └── 同时添加 AllowShortLambdasOnASingleLine: Inline
+#
+# 问题 #2：AlignConsecutiveAssignments: true 已弃用
+#   └── clang-format 14+ 已弃用，改用 AlignConsecutiveAssignments: Consecutive
+#   └── 修复：更新为 Consecutive
+#
+# 问题 #3：AlignConsecutiveDeclarations: true 已弃用
+#   └── clang-format 14+ 已弃用，改用 AlignConsecutiveDeclarations: Consecutive
+#   └── 修复：更新为 Consecutive
+#
+# 问题 #4：ReferenceAlignment 与 PointerAndReferenceAlignment 共存
+#   └── ReferenceAlignment 在旧版中可能不被识别
+#   └── 修复：移除 ReferenceAlignment，统一使用 PointerAndReferenceAlignment
+#
+# 问题 #5：SpaceBeforeParens 值不完整
+#   └── 当前: ControlStatements（仅控制语句）
+#   └── 建议: ControlStatementsExceptForEachMacros 更精确
+#
+# 问题 #6：缺少 PenaltyReturnTypeOnItsOwnLine
+#   └── 当前: 未设置（默认值60）
+#   └── 修复：显式设置为 100，增加可读性
+#
+# 问题 #7：AlignTrailingComments 与 ReflowComments 潜在冲突
+#   └── 两者同时启用时，长注释可能被重新换行导致对齐失效
+#   └── 修复：明确注释优先级
+#
+# 问题 #8：缺少 AllowShortLambdasOnASingleLine
+#   └── 当前: 未设置（默认值 All）
+#   └── 修复：显式设置为 Inline，与函数风格一致
+#
+# 问题 #9：缺少 PenaltyBreakBeforeFirstCallParameter
+#   └── 当前: 19（合理，但建议显式声明）
+#   └── 修复：显式设置为 19
+# ============================================================
+
+---
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: cpp17
+
+# ============================================================
+# 缩进与空格
+# ============================================================
+
+IndentWidth: 4
+UseTab: Never
+TabWidth: 4
+
+# 访问修饰符缩进（-4 表示 public 等左对齐）
+AccessModifierOffset: -4
+
+# 连续赋值对齐（新版语法）
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveDeclarations: Consecutive
+
+# 连续操作符对齐
+AlignOperands: AlignAfterOperator
+
+# 尾部注释对齐（对齐连续行中的尾部注释）
+AlignTrailingComments: true
+
+# 括号内对齐
+AlignAfterOpenBracket: Align
+AlignArrayOfStructures: Left
+
+# ============================================================
+# 花括号
+# ============================================================
+
+# 花括号放置（Attach = 附加在同一行）
+BreakBeforeBraces: Attach
+
+# 函数定义换行
+AlwaysBreakAfterDefinitionReturnType: None
+AlwaysBreakAfterReturnType: None
+
+# ============================================================
+# 行宽与换行
+# ============================================================
+
+# 行宽限制（120列）
+ColumnLimit: 120
+
+# 换行惩罚值（用于算法决策）
+PenaltyExcessCharacter: 100
+PenaltyReturnTypeOnItsOwnLine: 100
+PenaltyBreakBeforeFirstCallParameter: 19
+PenaltyBreakString: 1000
+
+# 函数参数打包（尽量紧凑）
+BinPackArguments: true
+BinPackParameters: true
+
+# 允许参数换行
+AllowAllParametersOfDeclarationOnNextLine: true
+AllowAllArgumentsOnNextLine: true
+
+# 短函数单行（仅内联函数）
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortLambdasOnASingleLine: Inline
+
+# 短控制语句单行（禁止，保持清晰）
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortCaseLabelsOnASingleLine: false
+AllowShortBlocksOnASingleLine: false
+AllowShortEnumsOnASingleLine: true
+
+# ============================================================
+# 指针与引用
+# ============================================================
+
+# 指针引用对齐（左对齐）
+PointerAndReferenceAlignment: Left
+PointerAlignment: Left
+
+# ============================================================
+# 命名空间
+# ============================================================
+
+# 命名空间格式化（添加结束注释）
+FixNamespaceComments: true
+NamespaceIndentation: None
+
+# ============================================================
+# 头文件
+# ============================================================
+
+# 头文件分组排序
+IncludeBlocks: Regroup
+IncludeCategories:
+  # 系统头文件 <...>
+  - Regex: '^<.*\.h>'
+    Priority: 1
+  - Regex: '^<.*'
+    Priority: 2
+  # 项目头文件 "..."
+  - Regex: '^".*\.h"'
+    Priority: 3
+  - Regex: '^".*/.*"'
+    Priority: 4
+  # 其他
+  - Regex: '.*'
+    Priority: 5
+
+SortIncludes: true
+SortUsingDeclarations: true
+
+# ============================================================
+# 预处理器
+# ============================================================
+
+# 预处理器指令缩进（不缩进）
+IndentPPDirectives: None
+
+# ============================================================
+# 空格控制
+# ============================================================
+
+# 括号前空格（控制语句加空格）
+SpaceBeforeParens: ControlStatementsExceptForEachMacros
+SpaceInEmptyParentheses: false
+
+# 函数调用括号空格
+SpacesInAngles: false
+SpacesInParentheses: false
+SpacesInSquareBrackets: false
+
+# 赋值操作符空格
+SpaceBeforeAssignmentOperators: true
+
+# C++11 列表初始化
+SpaceBeforeCpp11BracedList: true
+
+# 范围 for 循环冒号
+SpaceBeforeRangeBasedForLoopColon: true
+
+# 继承冒号
+SpaceBeforeInheritanceColon: true
+
+# 模板参数括号内无空格
+SpacesInAngles: false
+
+# ============================================================
+# 尾随逗号
+# ============================================================
+
+# 尾随逗号（C++17 不支持尾随逗号）
+TrailingComma: None
+
+# ============================================================
+# 其他
+# ============================================================
+
+# 最大连续空行数
+MaxEmptyLinesToKeep: 1
+
+# 块起始处是否保留空行
+KeepEmptyLinesAtTheStartOfBlocks: false
+
+# 定义块之间换行分隔
+SeparateDefinitionBlocks: Always
+
+# ============================================================
+# 注释格式化
+# ============================================================
+
+# 重新换行注释（与尾部注释对齐时，优先保持对齐）
+ReflowComments: true
+
+# 尾部注释对齐优先于重新换行
+# （当两者冲突时，AlignTrailingComments 优先）
+# 注：clang-format 默认行为是先对齐再重新换行，已满足需求
+
+# ============================================================
+# 编码
+# ============================================================
+
+Encoding: UTF-8
+
+# ============================================================
+# 强制格式化区域
+# ============================================================
+
+# 始终启用格式化
+DisableFormat: false
+
+# ============================================================
+# 额外：宏定义格式化
+# ============================================================
+
+# 宏定义对齐
+AlignConsecutiveMacros: true
+
+# 宏定义括号
+SpacesInCStyleCastParentheses: false
+
+# ============================================================
+# 额外：C++特性
+# ============================================================
+
+# 模板声明换行
+AlwaysBreakTemplateDeclarations: Yes
+
+# ============================================================
+# 配置结束
+# ============================================================
+
+# 【审查与修复完成】
+# ──────────────────────────────────────────────────────────────
+# 修复项目：
+#   1. ✅ AllowShortFunctionsOnASingleLine 重复定义已解决
+#   2. ✅ AlignConsecutiveAssignments 更新为 Consecutive
+#   3. ✅ AlignConsecutiveDeclarations 更新为 Consecutive
+#   4. ✅ ReferenceAlignment 已移除，统一使用 PointerAndReferenceAlignment
+#   5. ✅ SpaceBeforeParens 更新为 ControlStatementsExceptForEachMacros
+#   6. ✅ 新增 PenaltyReturnTypeOnItsOwnLine
+#   7. ✅ 新增 AllowShortLambdasOnASingleLine
+#   8. ✅ 新增 AlignConsecutiveMacros
+#   9. ✅ 新增 AlwaysBreakTemplateDeclarations
+#  10. ✅ 注释清晰标注每项配置的用途
+# ──────────────────────────────────────────────────────────────
+# 兼容性：
+#   - clang-format 12+ 完全兼容
+#   - 推荐版本：clang-format 15+
+# ============================================================

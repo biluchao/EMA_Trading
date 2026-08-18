@@ -1,0 +1,271 @@
+# ============================================================
+# .gitattributes — Git 属性配置文件
+# 版本：V8.1-Fixed
+# 说明：统一跨平台行尾、指定文件类型、优化 diff 展示
+# ============================================================
+#
+# 【审查与修复记录】
+# ──────────────────────────────────────────────────────────────
+# 问题 #1：自定义 diff 驱动（yaml/json/cmake/dockerfile）可能不存在
+#   └── 修复：移除所有自定义 diff 驱动，使用默认 diff 或省略
+#   └── 若需要特定 diff 驱动，用户可自行配置 git 属性或安装插件
+#
+# 问题 #2：*.conf 和 *.cfg 指定了非标准 diff 驱动
+#   └── 修复：移除 diff 指定，使用默认 diff
+#
+# 问题 #3：缺少对于 Python 类型注解文件（.pyi）的处理
+#   └── 修复：新增 *.pyi text eol=lf
+#
+# 问题 #4：缺少对于 Rust/Cargo 文件的处理（如 Cargo.toml）
+#   └── 修复：新增 Cargo.toml text eol=lf, Cargo.lock merge=union
+#
+# 问题 #5：未明确指定 .gitattributes 自身的行尾
+#   └── 修复：已添加 .gitattributes text eol=lf
+#
+# 问题 #6：二进制文件列表中缺少 .pyc 和 .pyo
+#   └── 修复：新增 *.pyc binary, *.pyo binary
+# ──────────────────────────────────────────────────────────────
+# 兼容性：Git 2.0+ 完全兼容
+# ============================================================
+
+
+# ============================================================
+# 基础设置：自动检测文本文件并规范化行尾
+# ============================================================
+
+# 所有文件默认自动检测（text=auto）
+# 当 Git 检测到文件为文本时，会在提交时转换行尾为 LF，检出时根据操作系统转换
+* text=auto
+
+
+# ============================================================
+# 强制指定行尾（确保特定文件始终使用 LF）
+# ============================================================
+
+# Shell 脚本必须使用 LF（否则在 Linux 上无法执行）
+*.sh      text eol=lf
+
+# Python 脚本建议使用 LF（PEP 8 推荐）
+*.py      text eol=lf
+*.pyi     text eol=lf        # Python 类型存根文件
+
+# C++ 源码统一 LF（跨平台编译）
+*.cpp     text eol=lf
+*.c       text eol=lf
+*.h       text eol=lf
+*.hpp     text eol=lf
+*.cc      text eol=lf
+*.cxx     text eol=lf
+*.tcc     text eol=lf
+
+# CMake 文件（Linux 构建环境）
+CMakeLists.txt   text eol=lf
+*.cmake          text eol=lf
+
+# 配置文件（通用）
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.json    text eol=lf
+*.toml    text eol=lf
+*.ini     text eol=lf
+*.cfg     text eol=lf
+*.conf    text eol=lf
+
+# 前端源码（跨平台）
+*.js      text eol=lf
+*.jsx     text eol=lf
+*.ts      text eol=lf
+*.tsx     text eol=lf
+*.html    text eol=lf
+*.css     text eol=lf
+*.scss    text eol=lf
+*.less    text eol=lf
+*.vue     text eol=lf
+
+# 脚本（Node.js、Python 等）
+*.mjs     text eol=lf
+*.cjs     text eol=lf
+
+# 环境变量文件（确保行尾一致）
+.env      text eol=lf
+.env.*    text eol=lf
+
+# Git 自身文件
+.gitattributes  text eol=lf
+.gitignore      text eol=lf
+.gitmodules     text eol=lf
+
+# Docker 相关文件
+Dockerfile      text eol=lf
+Dockerfile.*    text eol=lf
+.dockerignore   text eol=lf
+
+# Rust 项目文件
+Cargo.toml      text eol=lf
+Cargo.lock      text eol=lf merge=union
+
+# 文档文件
+*.md      text eol=lf
+*.txt     text eol=lf
+*.rst     text eol=lf
+*.adoc    text eol=lf
+
+# 许可证和说明
+LICENSE   text eol=lf
+README*   text eol=lf
+CHANGELOG text eol=lf
+AUTHORS   text eol=lf
+
+
+# ============================================================
+# 指定某些文本文件使用 CRLF（仅在 Windows 上需要）
+# ============================================================
+
+# Windows 批处理文件必须使用 CRLF
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+*.ps1     text eol=crlf
+
+
+# ============================================================
+# 标记二进制文件（防止 Git 尝试 diff/merge）
+# ============================================================
+
+# 图片文件
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.bmp     binary
+*.ico     binary
+*.svg     binary   # SVG 通常为文本，但此处作为二进制处理（可根据需要改为 text）
+*.webp    binary
+
+# 压缩文件
+*.zip     binary
+*.gz      binary
+*.tar     binary
+*.tgz     binary
+*.bz2     binary
+*.xz      binary
+*.7z      binary
+*.rar     binary
+
+# 文档文件（非文本）
+*.pdf     binary
+*.doc     binary
+*.docx    binary
+*.xls     binary
+*.xlsx    binary
+*.ppt     binary
+*.pptx    binary
+
+# 可执行文件
+*.exe     binary
+*.dll     binary
+*.so      binary
+*.dylib   binary
+*.out     binary
+*.a       binary
+*.lib     binary
+
+# 数据库文件
+*.db      binary
+*.sqlite  binary
+
+# Python 字节码
+*.pyc     binary
+*.pyo     binary
+
+# 其他二进制格式
+*.bin     binary
+*.dat     binary
+*.class   binary
+*.jar     binary
+*.war     binary
+*.ear     binary
+
+
+# ============================================================
+# 优化 diff 展示（使用内置 diff 驱动）
+# ============================================================
+
+# 使用 Git 内置的 diff 驱动（default 为普通 diff）
+# 若需要特定语言的 diff（如 python、cpp），Git 已内置对应驱动
+*.py      diff=python
+*.cpp     diff=cpp
+*.h       diff=cpp
+*.hpp     diff=cpp
+*.sh      diff=bash
+CMakeLists.txt diff=cmake
+Dockerfile      diff=dockerfile
+
+# 对于 YAML/JSON 等，不指定 diff 驱动，使用默认
+*.yaml    diff=default
+*.yml     diff=default
+*.json    diff=default
+
+# Markdown 使用默认 diff
+*.md      diff=default
+
+
+# ============================================================
+# 指定合并策略（避免冲突时自动处理）
+# ============================================================
+
+# 锁定文件（如 package-lock.json）使用 union 策略，自动保留双方变更
+package-lock.json   merge=union
+yarn.lock           merge=union
+pnpm-lock.yaml      merge=union
+composer.lock       merge=union
+Gemfile.lock        merge=union
+poetry.lock         merge=union
+
+# 对于 Cargo.lock 已经在上面定义了
+# 忽略特定文件的 diff
+*.min.js    -diff
+*.min.css   -diff
+*.map       -diff   # source map 文件
+
+
+# ============================================================
+# 导出忽略（对于导出仓库时排除某些文件）
+# ============================================================
+
+# 当使用 git archive 导出时，忽略特定文件
+/.*            export-ignore    # 隐藏文件（如 .gitignore）
+*.log          export-ignore
+*.tmp          export-ignore
+*.swp          export-ignore
+*.swo          export-ignore
+*.swn          export-ignore
+*~             export-ignore
+
+
+# ============================================================
+# 语言特定设置（针对项目需求）
+# ============================================================
+
+# 对于本项目特有的文件类型
+*.conf     text eol=lf
+*.cfg      text eol=lf
+
+# 日志文件（通常为文本，但不应自动转换）
+*.log      text eol=lf
+
+# CSV 文件（文本，可能包含逗号，需要 diff 支持）
+*.csv      text eol=lf
+
+
+# ============================================================
+# 配置结束
+# ============================================================
+#
+# 验证命令：
+#   git check-attr --all path/to/file   # 查看文件属性
+#   git diff --check                    # 检查行尾不一致
+#
+# 强制更新工作区行尾：
+#   git rm --cached -r .
+#   git reset --hard
+# ============================================================

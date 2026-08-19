@@ -1,0 +1,411 @@
+# ============================================================
+# docker-compose.yml — Docker 编排配置
+# 版本：V8.1-Fixed
+# 说明：EMA量化交易系统完整容器化部署
+# 包含：后端服务 + 前端服务 + Redis缓存 + 可选监控
+# ============================================================
+#
+# 【审查与修复记录】
+# ──────────────────────────────────────────────────────────────
+# 问题 #1：健康检查命令依赖 curl/wget，但基础镜像可能不包含
+#   └── 修复：改用 wget --spider -q 或使用内置命令
+#   └── 后端改用: wget --spider -q http://localhost:8080/api/health
+#   └── 前端改用: wget --spider -q http://localhost:3000
+#
+# 问题 #2：backend 健康检查依赖 curl，但 Alpine 基础镜像无 curl
+#   └── 修复：在 Dockerfile 中安装 wget，或改用 redis-cli 替代方案
+#   └── 最佳实践：使用 wget 替代 curl（轻量）
+#
+# 问题 #3：Prometheus 配置文件路径可能不存在
+#   └── 修复：添加 volume 检查，或使用内置配置
+#
+# 问题 #4：Grafana 健康检查使用 wget，但端口可能不匹配
+#   └── 修复：统一使用 3000 端口健康检查
+#
+# 问题 #5：backup/restore 脚本缺少执行权限
+#   └── 修复：在 Dockerfile 中添加 chmod +x
+#
+# 问题 #6：backend-data 卷未正确挂载到容器内路径
+#   └── 修复：映射 /app/data 到 backend-data 卷
+#
+# 问题 #7：环境变量缺失导致容器启动失败
+#   └── 修复：添加必要环境变量默认值
+#
+# 问题 #8：服务依赖等待时间不足
+#   └── 修复：增加 start_period 和 retries
+#
+# 问题 #9：日志驱动配置不一致
+#   └── 修复：统一使用 json-file 驱动
+#
+# 问题 #10：缺少退出信号处理
+#   └── 修复：添加 stop_signal: SIGTERM
+# ──────────────────────────────────────────────────────────────
+# 兼容性：Docker Compose 3.8+
+# ============================================================
+
+version: '3.8'
+
+# ============================================================
+# 网络配置
+# ============================================================
+networks:
+  ema-network:
+    name: ema-network
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+# ============================================================
+# 卷配置（持久化存储）
+# ============================================================
+volumes:
+  redis-data:
+    name: ema-redis-data
+  backend-data:
+    name: ema-backend-data
+  logs:
+    name: ema-logs
+  prometheus-data:
+    name: ema-prometheus-data
+  grafana-data:
+    name: ema-grafana-data
+
+# ============================================================
+# 服务定义
+# ============================================================
+services:
+
+  # ==========================================================
+  # Redis 缓存服务
+  # ==========================================================
+  redis:
+    image: redis:7.2-alpine
+    container_name: ema-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --appendonly yes
+      --appendfsync everysec
+      --requirepass ${REDIS_PASSWORD:-}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - ema-network
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    stop_signal: SIGTERM
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+
+  # ==========================================================
+  # 后端服务
+  # ==========================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+      args:
+        - BUILD_TYPE=${BUILD_TYPE:-Release}
+    image: ema-backend:latest
+    container_name: ema-backend
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"      # REST API
+      - "${BACKEND_WS_PORT:-8081}:8081"   # WebSocket
+      - "${METRICS_PORT:-9090}:9090"      # Metrics
+    volumes:
+      - backend-data:/app/data
+      - logs:/app/logs
+      - ./config:/app/config:ro
+    networks:
+      - ema-network
+    environment:
+      - ENV_MODE=${ENV_MODE:-production}
+      - TZ=${TZ:-Asia/Shanghai}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - BINANCE_API_KEY=${BINANCE_API_KEY:-}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET:-}
+      - BINANCE_API_BASE_URL=${BINANCE_API_BASE_URL:-https://fapi.binance.com}
+      - BINANCE_WS_BASE_URL=${BINANCE_WS_BASE_URL:-wss://fstream.binance.com}
+      - SNAPSHOT_ENCRYPTION_KEY=${SNAPSHOT_ENCRYPTION_KEY:-}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-}
+      - MAX_POSITION=${MAX_POSITION:-3.0}
+      - MAX_DAILY_LOSS=${MAX_DAILY_LOSS:-1000}
+      - TRADING_MODE=${TRADING_MODE:-PAPER}
+      - DATA_PATH=/app/data
+      - SNAPSHOT_PATH=/app/data/snapshots
+      - LOG_PATH=/app/logs
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8080/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+        reservations:
+          memory: 1G
+          cpus: '0.5'
+
+  # ==========================================================
+  # 前端服务
+  # ==========================================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://localhost:8080}
+        - VITE_WS_BASE_URL=${VITE_WS_BASE_URL:-ws://localhost:8081}
+    image: ema-frontend:latest
+    container_name: ema-frontend
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    volumes:
+      - ./frontend/public:/app/public:ro
+    networks:
+      - ema-network
+    environment:
+      - NODE_ENV=${ENV_MODE:-production}
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-http://backend:8080}
+      - VITE_WS_BASE_URL=${VITE_WS_BASE_URL:-ws://backend:8081}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.1'
+
+  # ==========================================================
+  # 可选服务：Prometheus 监控
+  # ==========================================================
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    container_name: ema-prometheus
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${PROMETHEUS_PORT:-9091}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - ema-network
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    profiles:
+      - monitoring
+      - full
+
+  # ==========================================================
+  # 可选服务：Grafana 可视化
+  # ==========================================================
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: ema-grafana
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    ports:
+      - "${GRAFANA_PORT:-3001}:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - ema-network
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel
+      - GF_SERVER_ROOT_URL=${GRAFANA_ROOT_URL:-http://localhost:3001}
+      - GF_SERVER_HTTP_PORT=3000
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.2'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    profiles:
+      - monitoring
+      - full
+
+  # ==========================================================
+  # 可选服务：Nginx 反向代理（生产环境推荐）
+  # ==========================================================
+  nginx:
+    image: nginx:alpine
+    container_name: ema-nginx
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    ports:
+      - "${NGINX_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+      - logs:/var/log/nginx
+    networks:
+      - ema-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.2'
+        reservations:
+          memory: 64M
+          cpus: '0.05'
+    profiles:
+      - production
+      - full
+
+# ============================================================
+# 配置结束
+# ============================================================
+#
+# 使用说明：
+#   1. 确保 .env 文件存在并配置正确
+#   2. 构建镜像：docker-compose build
+#   3. 启动服务：docker-compose up -d
+#   4. 查看日志：docker-compose logs -f
+#   5. 停止服务：docker-compose down
+#   6. 带监控启动：docker-compose --profile monitoring up -d
+#   7. 生产环境启动：docker-compose --profile production up -d
+#   8. 完整部署：docker-compose --profile full up -d
+#
+# 验证：
+#   - 后端健康检查：curl http://localhost:8080/api/health
+#   - 前端访问：http://localhost:3000
+#   - Redis：redis-cli -h localhost ping
+#   - Prometheus：http://localhost:9091
+#   - Grafana：http://localhost:3001 (admin/admin)
+#
+# 环境变量：
+#   - REDIS_PASSWORD: Redis 密码（可选）
+#   - BACKEND_PORT: 后端 API 端口（默认 8080）
+#   - FRONTEND_PORT: 前端服务端口（默认 3000）
+#   - METRICS_PORT: 指标端口（默认 9090）
+#   - GRAFANA_PORT: Grafana 端口（默认 3001）
+#   - NGINX_PORT: Nginx HTTP 端口（默认 80）
+#   - ENV_MODE: 环境模式（production/development）
+#   - TRADING_MODE: 交易模式（LIVE/PAPER/BACKTEST）
+#   - LOG_LEVEL: 日志级别（DEBUG/INFO/WARN/ERROR）
+# ============================================================

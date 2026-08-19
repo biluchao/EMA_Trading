@@ -1,0 +1,43 @@
+# ============================================================
+# requirements.txt — EMA 量化交易系统 Python 依赖
+# 版本：V8.2-Fixed
+# 说明：基于 PyPI 最新稳定版本锁定
+# 更新日期：2026-08-19
+# ============================================================
+#
+# 版本说明：
+#   - pyyaml 6.0.3：YAML 解析[reference:11]
+#   - redis 8.0.1：Redis 客户端[reference:12]
+#   - pybind11 3.1.0：C++/Python 绑定，要求 Python 3.9+[reference:13]
+#   - numpy 2.5.1：科学计算[reference:14]
+#   - pandas 3.0.5：数据分析，要求 Python 3.11+[reference:15]
+#   - matplotlib 3.11.0：图表绘制[reference:16]
+#   - websocket-client 1.9.0：WebSocket 客户端[reference:17]
+#   - requests 2.34.2：HTTP 客户端[reference:18]
+#   - pytest 9.1.1：单元测试框架[reference:19]
+#   - pytest-cov 7.1.0：测试覆盖率[reference:20]
+#   - pydantic 2.13.4：数据校验[reference:21]
+# ============================================================
+
+# ---------- 基础依赖 ----------
+pyyaml==6.0.3
+redis==8.0.1
+pybind11==3.1.0
+
+# ---------- 数据处理 ----------
+numpy==2.5.1
+pandas==3.0.5
+
+# ---------- 可视化 ----------
+matplotlib==3.11.0
+
+# ---------- 网络通信 ----------
+websocket-client==1.9.0
+requests==2.34.2
+
+# ---------- 数据校验 ----------
+pydantic==2.13.4
+
+# ---------- 测试框架 ----------
+pytest==9.1.1
+pytest-cov==7.1.0

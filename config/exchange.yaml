@@ -1,0 +1,328 @@
+# ============================================================
+# exchange.yaml — 币安交易所配置
+# 版本：V8.3-Fixed
+# 说明：EMA量化交易系统币安合约API配置
+# 包含：REST/WebSocket端点、合约参数、限频、资金费率
+# ============================================================
+#
+# 【审查与修复记录 V8.3】
+# ──────────────────────────────────────────────────────────────
+# 问题 #1：环境变量未提供默认值，可能导致空值错误
+#   └── 修复：在所有 ${ENV_VAR} 处添加默认值（如 ${VAR:-default}）
+#
+# 问题 #2：重试策略中 max_delay_ms 与 backoff 逻辑缺少联动
+#   └── 修复：增加 max_delay_ms 与 backoff_multiplier 联动说明
+#
+# 问题 #3：缺少 WebSocket 心跳超时和消息超时配置
+#   └── 修复：增加 ws_pong_timeout 和 ws_message_timeout
+#
+# 问题 #4：缺少断线重连时的数据补偿配置
+#   └── 修复：增加 reconnect_sync_window 用于数据同步
+#
+# 问题 #5：限频配置的 max_orders_per_day 未考虑币安实际限制
+#   └── 修复：根据币安实际限制调整为 10000
+#
+# 问题 #6：缺少 API 响应格式版本控制
+#   └── 修复：增加 api_response_version 用于处理 API 变更
+#
+# 问题 #7：资金费率检查时间缺少时区明确声明
+#   └── 修复：明确标注所有时间为 UTC+8
+#
+# 问题 #8：缺少健康检查端点配置
+#   └── 修复：增加 health_check 配置块
+#
+# 问题 #9：缺少市场数据心跳检测
+#   └── 修复：增加 market_data_heartbeat 配置
+#
+# 问题 #10：合约精度（tick_size, min_qty）未与实际交易所对齐
+#   └── 修复：更新为币安当前实际精度
+# ──────────────────────────────────────────────────────────────
+# 兼容性：YAML 1.2
+# ============================================================
+
+# ============================================================
+# 环境配置（通过环境变量切换）
+# ============================================================
+environment: "${ENV_MODE:-production}"  # production | testnet | sandbox
+
+# ============================================================
+# 环境端点映射
+# ============================================================
+environments:
+  production:
+    name: "币安生产环境"
+    api_base_url: "https://fapi.binance.com"
+    ws_base_url: "wss://fstream.binance.com"
+    api_key: "${BINANCE_API_KEY:-}"
+    api_secret: "${BINANCE_API_SECRET:-}"
+    test: false
+
+  testnet:
+    name: "币安测试网"
+    api_base_url: "https://testnet.binancefuture.com"
+    ws_base_url: "wss://stream.binancefuture.com"
+    api_key: "${BINANCE_TESTNET_API_KEY:-}"
+    api_secret: "${BINANCE_TESTNET_API_SECRET:-}"
+    test: true
+
+  sandbox:
+    name: "币安沙盒"
+    api_base_url: "https://api.binance.com/sapi/v1"
+    ws_base_url: "wss://stream.binance.com:9443/ws"
+    api_key: "${BINANCE_SANDBOX_API_KEY:-}"
+    api_secret: "${BINANCE_SANDBOX_API_SECRET:-}"
+    test: true
+
+# ============================================================
+# API 基础配置（引用环境变量）
+# ============================================================
+exchange:
+  # ---- API 认证 ----
+  api_key: "${BINANCE_API_KEY:-}"
+  api_secret: "${BINANCE_API_SECRET:-}"
+
+  # ---- API 响应版本（用于处理 API 变更） ----
+  api_response_version: "v1"
+
+  # ---- 签名配置 ----
+  signature:
+    algorithm: "HMAC_SHA256"      # HMAC_SHA256 | ED25519
+    timestamp_window_ms: 5000     # recvWindow
+    timestamp_unit: "milliseconds"
+
+  # ---- 超时配置 ----
+  timeout:
+    connect_seconds: 5
+    request_seconds: 10
+    websocket_ping_interval: 30   # 秒
+    websocket_pong_timeout: 10    # 秒（等待 PONG 超时）
+    websocket_message_timeout: 15 # 秒（等待消息超时）
+    websocket_reconnect_delay: 1  # 秒（初始重连延迟）
+
+  # ---- 重试策略 ----
+  retry:
+    max_attempts: 3
+    base_delay_ms: 100
+    max_delay_ms: 10000           # 最大延迟（配合 backoff 使用）
+    backoff_multiplier: 2.0       # 退避乘数（每次重试延迟 * 2）
+    retry_on_status:             # 可重试的 HTTP 状态码
+      - 408
+      - 429
+      - 500
+      - 502
+      - 503
+      - 504
+
+  # ---- 健康检查 ----
+  health_check:
+    enabled: true
+    interval_seconds: 60
+    endpoint: "/fapi/v1/ping"
+    timeout_seconds: 5
+
+  # ---- 市场数据心跳 ----
+  market_data_heartbeat:
+    enabled: true
+    interval_seconds: 30
+    max_age_seconds: 60           # 超过此时间视为数据断流
+
+  # ---- 断线重连数据同步 ----
+  reconnect_sync:
+    enabled: true
+    sync_window_seconds: 300      # 同步最近5分钟数据
+    max_sync_retries: 3
+
+# ============================================================
+# 合约配置
+# ============================================================
+contracts:
+  # ---- BTCUSDT 永续合约 ----
+  BTCUSDT:
+    symbol: "BTCUSDT"
+    contract_type: "PERPETUAL"      # PERPETUAL | CURRENT_MONTH | NEXT_MONTH
+    margin_type: "CROSSED"          # CROSSED | ISOLATED
+    leverage: 3
+    position_side: "BOTH"           # BOTH | LONG | SHORT
+    # 限频配置（币安合约实际限制）
+    order_rate_limit_10s: 10
+    order_rate_limit_1m: 1200
+    order_rate_limit_1d: 10000
+    # 精度（币安实际精度）
+    tick_size: 0.1                 # 最小价格变动
+    min_qty: 0.001                # 最小下单数量
+    step_size: 0.001              # 数量步长
+    min_notional: 5.0             # 最小名义价值（USDT）
+
+  # ---- ETHUSDT 永续合约 ----
+  ETHUSDT:
+    symbol: "ETHUSDT"
+    contract_type: "PERPETUAL"
+    margin_type: "CROSSED"
+    leverage: 3
+    position_side: "BOTH"
+    order_rate_limit_10s: 10
+    order_rate_limit_1m: 1200
+    order_rate_limit_1d: 10000
+    tick_size: 0.01               # ETH 精度更高
+    min_qty: 0.01
+    step_size: 0.01
+    min_notional: 5.0
+
+# ============================================================
+# 订单默认参数
+# ============================================================
+order_defaults:
+  time_in_force: "GTC"              # GTC | IOC | FOK | GTX | GTD
+  new_order_resp_type: "RESULT"     # ACK | RESULT
+  working_type: "MARK_PRICE"        # MARK_PRICE | CONTRACT_PRICE
+  # 条件单类型（币安 Algo Order）
+  conditional_order_type: "STOP_MARKET"
+  # 止损/止盈触发价格类型
+  stop_trigger: "MARK_PRICE"
+  take_profit_trigger: "MARK_PRICE"
+
+# ============================================================
+# WebSocket 流配置
+# ============================================================
+websocket:
+  # ---- 连接配置 ----
+  enabled: true
+  max_streams_per_connection: 200
+  ping_interval: 30                # 秒
+  pong_timeout: 10                 # 秒
+  reconnect_delay: 1               # 秒（初始）
+  max_reconnect_delay: 60          # 秒
+  reconnect_multiplier: 2
+  # ---- 消息缓冲 ----
+  message_buffer_size: 10000
+  parse_timeout_seconds: 5
+
+  # ---- 订阅流分组 ----
+  connections:
+    # 市场数据流
+    market_data:
+      streams:
+        - "btcusdt@aggTrade"
+        - "btcusdt@depth20@100ms"
+        - "btcusdt@markPrice"
+        - "ethusdt@aggTrade"
+        - "ethusdt@depth20@100ms"
+        - "ethusdt@markPrice"
+      depth_levels: 20
+      update_speed: "100ms"         # 100ms | 400ms
+
+    # 用户数据流（独立连接）
+    user_data:
+      streams:
+        - "userData"
+      listen_key_refresh: 45        # 分钟（币安 60 分钟过期）
+
+# ============================================================
+# 限频保护
+# ============================================================
+rate_limit:
+  # ---- IP 权重限频（币安默认 2400/分钟） ----
+  weight_limit:
+    enabled: true
+    max_weight_per_minute: 2400
+    reserved_weight: 400            # 预留权重
+    # 各端点权重（用于精确控制）
+    endpoint_weights:
+      "/fapi/v1/order": 1
+      "/fapi/v1/algoOrder": 1
+      "/fapi/v1/account": 20
+      "/fapi/v1/position": 20
+
+  # ---- 订单限频 ----
+  order_limit:
+    enabled: true
+    max_orders_per_10s: 10
+    max_orders_per_1m: 1200
+    max_orders_per_day: 10000
+
+  # ---- 连接限频 ----
+  connection_limit:
+    max_connections: 10
+    max_requests_per_second: 50
+
+# ============================================================
+# 资金费率配置（所有时间均为 UTC+8）
+# ============================================================
+funding_rate:
+  # ---- 结算时间（UTC+8） ----
+  settlement_intervals:
+    - "00:00"
+    - "04:00"
+    - "08:00"
+    - "12:00"
+    - "16:00"
+    - "20:00"
+
+  # ---- 监控配置 ----
+  check_ahead_minutes: 5
+  extreme_threshold: 0.001         # 极端费率阈值 (0.1%)
+  normal_threshold: 0.0001         # 正常费率阈值 (0.01%)
+
+  # ---- 结算前动作 ----
+  pre_settlement:
+    enabled: true
+    check_ahead_seconds: 300       # 5分钟前检查
+    reduce_threshold: 0.0005       # 费率超过0.05%时减仓
+    reduce_ratio: 0.3              # 减仓比例30%
+
+  # ---- 费率历史 ----
+  history:
+    retention_hours: 168           # 保留7天历史
+    update_interval_seconds: 60
+
+# ============================================================
+# 条件单（Algo Order）限制
+# ============================================================
+algo_order:
+  max_pending_per_symbol: 10
+  max_pending_total: 10000
+  # 条件单触发后子订单超时
+  child_order_timeout_seconds: 30
+  # 条件单触发检查
+  trigger_check_interval_seconds: 1
+
+# ============================================================
+# 持仓模式配置
+# ============================================================
+position_mode:
+  dual_side_position: false         # false=单向持仓，true=双向持仓
+  # ⚠️ 注意：UM和CM共用dualSidePosition设置
+
+# ============================================================
+# 监控告警配置
+# ============================================================
+monitoring:
+  # ---- 连接状态 ----
+  connection:
+    check_interval_seconds: 10
+    max_failures: 3
+
+  # ---- 订单 ----
+  orders:
+    pending_timeout_seconds: 30
+    max_pending_orders: 100
+
+  # ---- 持仓 ----
+  positions:
+    check_interval_seconds: 60
+    max_position_change_ratio: 0.5
+
+# ============================================================
+# 配置结束
+# ============================================================
+#
+# 使用说明：
+#   1. 复制此文件到 config/exchange.yaml
+#   2. 在 .env 文件中配置 BINANCE_API_KEY 和 BINANCE_API_SECRET
+#   3. 确认合约参数（杠杆、保证金模式）符合预期
+#   4. 重启系统使配置生效
+#
+# 验证命令：
+#   python3 -c "import yaml; yaml.safe_load(open('config/exchange.yaml'))"
+#   curl -s https://fapi.binance.com/fapi/v1/ping
+# ============================================================

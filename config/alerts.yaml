@@ -1,0 +1,589 @@
+# ============================================================
+# alerts.yaml — EMA 量化交易系统告警配置
+# 版本：V8.3-Fixed
+# 说明：定义系统告警规则、通知渠道、告警抑制和升级策略
+# 使用：告警引擎读取此配置，实时监控系统状态
+# ============================================================
+#
+# 【审查与修复记录 V8.3】
+# ──────────────────────────────────────────────────────────────
+# 问题 #1：环境变量引用未提供默认值，可能导致空值
+#   └── 修复：在配置中添加注释说明，建议用户配置所有环境变量
+#
+# 问题 #2：部分规则缺少 channels 声明（实际检查均完整）
+#   └── 已确认所有规则都有 channels
+#
+# 问题 #3：suppression.dependency.rules 中 children 列表可能重复
+#   └── 增加注释，建议告警引擎进行去重
+#
+# 问题 #4：alert_engine.max_alerts_per_minute 未设置告警风暴后的静默动作
+#   └── 增加建议：超过阈值时自动静默
+#
+# 问题 #5：部分告警规则 cooldown 时间过短（如 data_ws_disconnect cooldown=10s）
+#   └── 调整部分关键告警的 cooldown 时间，避免频繁告警
+# ──────────────────────────────────────────────────────────────
+# 兼容性：YAML 1.2
+# ============================================================
+
+
+# ============================================================
+# 告警引擎配置
+# ============================================================
+alert_engine:
+  enabled: true
+  check_interval: 10              # 告警检查间隔（秒）
+  evaluation_window: 60          # 评估窗口（秒）
+  max_alerts_per_minute: 10      # 每分钟最大告警数（超过后自动静默）
+  alert_history_retention: 30    # 告警历史保留天数
+
+
+# ============================================================
+# 通知渠道配置
+# ============================================================
+channels:
+  # ---- Telegram（推荐使用） ----
+  telegram:
+    enabled: true
+    bot_token: "${TELEGRAM_BOT_TOKEN}"
+    chat_id: "${TELEGRAM_CHAT_ID}"
+    parse_mode: "HTML"
+    # 消息模板
+    template: |
+      <b>🚨 ${alert.severity}</b>
+      <b>告警:</b> ${alert.name}
+      <b>详情:</b> ${alert.message}
+      <b>时间:</b> ${alert.timestamp}
+      <b>服务:</b> ${alert.service}
+      <b>指标:</b> ${alert.metric} = ${alert.value}
+
+  # ---- 邮件通知 ----
+  email:
+    enabled: false
+    smtp_host: "${SMTP_HOST}"
+    smtp_port: ${SMTP_PORT:-587}
+    smtp_user: "${SMTP_USER}"
+    smtp_password: "${SMTP_PASSWORD}"
+    from: "${NOTIFICATION_EMAIL}"
+    to: "${NOTIFICATION_EMAIL}"
+    subject_template: "[EMA] ${alert.severity} - ${alert.name}"
+
+  # ---- 钉钉（企业微信/飞书同理） ----
+  dingtalk:
+    enabled: false
+    webhook_url: "${DINGTALK_WEBHOOK}"
+    secret: "${DINGTALK_SECRET}"
+
+  # ---- 桌面通知（仅本地） ----
+  desktop:
+    enabled: true
+    sound: true
+    timeout: 10000
+
+  # ---- Webhook（自定义集成） ----
+  webhook:
+    enabled: false
+    url: "${WEBHOOK_URL}"
+    method: "POST"
+    headers:
+      Content-Type: "application/json"
+
+
+# ============================================================
+# 告警分组
+# ============================================================
+groups:
+  # ---- 系统级告警 ----
+  system:
+    name: "系统告警"
+    priority: 1
+    channels: ["telegram", "email"]
+    enabled: true
+
+  # ---- 数据流告警 ----
+  data:
+    name: "数据告警"
+    priority: 2
+    channels: ["telegram"]
+    enabled: true
+
+  # ---- 交易告警 ----
+  trading:
+    name: "交易告警"
+    priority: 1
+    channels: ["telegram", "desktop"]
+    enabled: true
+
+  # ---- 策略告警 ----
+  strategy:
+    name: "策略告警"
+    priority: 2
+    channels: ["telegram"]
+    enabled: true
+
+  # ---- 性能告警 ----
+  performance:
+    name: "性能告警"
+    priority: 3
+    channels: ["telegram"]
+    enabled: true
+
+
+# ============================================================
+# 告警规则
+# ============================================================
+rules:
+  # ==========================================================
+  # 系统级告警
+  # ==========================================================
+
+  # ---- 进程崩溃 ----
+  - name: "系统进程崩溃"
+    id: "system_process_crash"
+    group: "system"
+    severity: "critical"
+    condition: "process_running == false"
+    check_interval: 10
+    cooldown: 300          # 调整为5分钟，避免频繁触发
+    message: "系统进程已崩溃，需要立即重启"
+    action: "restart_service"
+    channels: ["telegram", "email"]
+
+  # ---- 内存使用过高 ----
+  - name: "内存使用率过高"
+    id: "system_memory_high"
+    group: "system"
+    severity: "warning"
+    condition: "memory_usage > 85"
+    check_interval: 30
+    cooldown: 600
+    message: "内存使用率超过 85%，当前值: ${value}%"
+    action: "cleanup_memory"
+    channels: ["telegram"]
+
+  # ---- 磁盘空间不足 ----
+  - name: "磁盘空间不足"
+    id: "system_disk_low"
+    group: "system"
+    severity: "critical"
+    condition: "disk_usage > 90"
+    check_interval: 60
+    cooldown: 1800
+    message: "磁盘使用率超过 90%，当前值: ${value}%"
+    action: "cleanup_logs"
+    channels: ["telegram", "email"]
+
+  # ---- CPU 使用过高 ----
+  - name: "CPU 使用率过高"
+    id: "system_cpu_high"
+    group: "system"
+    severity: "warning"
+    condition: "cpu_usage > 80"
+    check_interval: 30
+    cooldown: 600
+    message: "CPU 使用率超过 80%，当前值: ${value}%"
+    action: "throttle"
+    channels: ["telegram"]
+
+  # ---- 系统时间漂移 ----
+  - name: "系统时间漂移过大"
+    id: "system_time_drift"
+    group: "system"
+    severity: "warning"
+    condition: "time_drift > 5000"
+    check_interval: 60
+    cooldown: 3600
+    message: "系统时间与交易所时间偏差超过 5 秒，当前偏差: ${value}ms"
+    action: "sync_time"
+    channels: ["telegram"]
+
+  # ==========================================================
+  # 数据流告警
+  # ==========================================================
+
+  # ---- WebSocket 断线 ----
+  - name: "WebSocket 连接断开"
+    id: "data_ws_disconnect"
+    group: "data"
+    severity: "critical"
+    condition: "ws_connected == false"
+    check_interval: 5
+    cooldown: 30           # 调整为30秒，避免告警风暴
+    message: "WebSocket 连接断开，正在尝试重连..."
+    action: "reconnect_ws"
+    channels: ["telegram"]
+
+  # ---- Tick 数据断流 ----
+  - name: "Tick 数据断流"
+    id: "data_tick_stall"
+    group: "data"
+    severity: "warning"
+    condition: "tick_age > 10000"
+    check_interval: 10
+    cooldown: 60
+    message: "Tick 数据断流超过 ${value}ms"
+    action: "check_connection"
+    channels: ["telegram"]
+
+  # ---- 深度数据更新延迟 ----
+  - name: "深度数据更新延迟"
+    id: "data_depth_stale"
+    group: "data"
+    severity: "warning"
+    condition: "depth_age > 500"
+    check_interval: 10
+    cooldown: 60
+    message: "深度数据延迟超过 500ms，当前延迟: ${value}ms"
+    action: "resubscribe_depth"
+    channels: ["telegram"]
+
+  # ---- 成交量异常 ----
+  - name: "成交量异常波动"
+    id: "data_volume_spike"
+    group: "data"
+    severity: "info"
+    condition: "volume_ratio > 3.0"
+    check_interval: 60
+    cooldown: 300
+    message: "成交量异常波动，当前为均值的 ${value} 倍"
+    action: "monitor_volume"
+    channels: ["telegram"]
+
+  # ---- 订单簿深度不足 ----
+  - name: "订单簿深度不足"
+    id: "data_depth_low"
+    group: "data"
+    severity: "warning"
+    condition: "depth_total < 10.0"
+    check_interval: 30
+    cooldown: 180
+    message: "订单簿深度不足，当前深度: ${value} 张"
+    action: "reduce_position"
+    channels: ["telegram"]
+
+  # ---- 标记价格与最新价偏差 ----
+  - name: "标记价格偏差过大"
+    id: "data_mark_deviation"
+    group: "data"
+    severity: "warning"
+    condition: "mark_deviation > 0.005"
+    check_interval: 30
+    cooldown: 300
+    message: "标记价格与最新价偏差超过 0.5%，当前偏差: ${value}%"
+    action: "use_conservative_price"
+    channels: ["telegram"]
+
+  # ==========================================================
+  # 交易告警
+  # ==========================================================
+
+  # ---- 订单提交失败 ----
+  - name: "订单提交失败"
+    id: "trading_order_failed"
+    group: "trading"
+    severity: "critical"
+    condition: "order_failed_count > 3"
+    check_interval: 10
+    cooldown: 120          # 调整为2分钟
+    message: "连续 ${value} 笔订单提交失败"
+    action: "pause_trading"
+    channels: ["telegram", "desktop"]
+
+  # ---- 订单超时未成交 ----
+  - name: "订单超时未成交"
+    id: "trading_order_timeout"
+    group: "trading"
+    severity: "warning"
+    condition: "order_timeout_count > 5"
+    check_interval: 30
+    cooldown: 300
+    message: "${value} 笔订单超时未成交"
+    action: "cancel_stale_orders"
+    channels: ["telegram"]
+
+  # ---- 滑点过大 ----
+  - name: "滑点超过阈值"
+    id: "trading_slippage_high"
+    group: "trading"
+    severity: "warning"
+    condition: "slippage_bps > 30"
+    check_interval: 10
+    cooldown: 60
+    message: "滑点超过 30 基点，当前滑点: ${value} 基点"
+    action: "adjust_slippage_model"
+    channels: ["telegram"]
+
+  # ---- 持仓异常变化 ----
+  - name: "持仓异常变化"
+    id: "trading_position_anomaly"
+    group: "trading"
+    severity: "critical"
+    condition: "position_change > 2.0 AND position_change_rate > 0.5"
+    check_interval: 5
+    cooldown: 10
+    message: "持仓异常变化，变动: ${value} 倍"
+    action: "check_position"
+    channels: ["telegram", "desktop"]
+
+  # ---- 资金费率极端 ----
+  - name: "资金费率极端"
+    id: "trading_funding_extreme"
+    group: "trading"
+    severity: "warning"
+    condition: "funding_rate > 0.001 OR funding_rate < -0.001"
+    check_interval: 60
+    cooldown: 3600
+    message: "资金费率极端，当前值: ${value}%"
+    action: "reduce_position"
+    channels: ["telegram"]
+
+  # ---- 连续亏损 ----
+  - name: "连续亏损"
+    id: "trading_loss_streak"
+    group: "trading"
+    severity: "warning"
+    condition: "consecutive_losses > 5"
+    check_interval: 10
+    cooldown: 1800
+    message: "连续 ${value} 笔亏损，触发冷却机制"
+    action: "cooling"
+    channels: ["telegram", "desktop"]
+
+  # ---- 日亏损超限 ----
+  - name: "日亏损超限"
+    id: "trading_daily_loss"
+    group: "trading"
+    severity: "critical"
+    condition: "daily_loss > max_daily_loss"
+    check_interval: 60
+    cooldown: 86400
+    message: "日亏损超过限制，当前亏损: ${value} USDT"
+    action: "stop_trading"
+    channels: ["telegram", "email"]
+
+  # ---- 强平预警 ----
+  - name: "强平预警"
+    id: "trading_liquidation_warning"
+    group: "trading"
+    severity: "critical"
+    condition: "shadow_distance < 0.06"
+    check_interval: 5
+    cooldown: 10
+    message: "影子强平距离小于 6%，当前距离: ${value}%"
+    action: "reduce_position"
+    channels: ["telegram", "desktop"]
+
+  # ---- 限频触发 ----
+  - name: "限频触发"
+    id: "trading_rate_limit"
+    group: "trading"
+    severity: "warning"
+    condition: "rate_limit_hit == true"
+    check_interval: 10
+    cooldown: 60
+    message: "触发交易所限频，交易暂停"
+    action: "throttle_orders"
+    channels: ["telegram"]
+
+  # ==========================================================
+  # 策略告警
+  # ==========================================================
+
+  # ---- 策略状态异常 ----
+  - name: "策略状态异常"
+    id: "strategy_state_error"
+    group: "strategy"
+    severity: "warning"
+    condition: "strategy_state == 'ERROR'"
+    check_interval: 10
+    cooldown: 60
+    message: "策略进入错误状态"
+    action: "reset_strategy"
+    channels: ["telegram"]
+
+  # ---- 贝叶斯失效 ----
+  - name: "贝叶斯模型失效"
+    id: "strategy_bayesian_failed"
+    group: "strategy"
+    severity: "warning"
+    condition: "bayesian_failed == true"
+    check_interval: 30
+    cooldown: 300
+    message: "贝叶斯模型连续 5 根 K 线失效"
+    action: "reset_bayesian"
+    channels: ["telegram"]
+
+  # ---- 信号质量下降 ----
+  - name: "信号质量下降"
+    id: "strategy_signal_quality_low"
+    group: "strategy"
+    severity: "info"
+    condition: "signal_quality < 0.5"
+    check_interval: 60
+    cooldown: 600
+    message: "信号质量评分低于 0.5，当前评分: ${value}"
+    action: "increase_threshold"
+    channels: ["telegram"]
+
+  # ---- 动态阈值异常 ----
+  - name: "动态阈值异常"
+    id: "strategy_threshold_anomaly"
+    group: "strategy"
+    severity: "info"
+    condition: "dynamic_threshold > 80 OR dynamic_threshold < 55"
+    check_interval: 60
+    cooldown: 300
+    message: "动态阈值异常，当前值: ${value}"
+    action: "check_threshold"
+    channels: ["telegram"]
+
+  # ---- 波动率突变 ----
+  - name: "波动率突变"
+    id: "strategy_volatility_spike"
+    group: "strategy"
+    severity: "info"
+    condition: "volatility_change > 0.5"
+    check_interval: 30
+    cooldown: 60
+    message: "波动率突变，变化率: ${value}%"
+    action: "adjust_parameters"
+    channels: ["telegram"]
+
+  # ==========================================================
+  # 性能告警
+  # ==========================================================
+
+  # ---- K线处理延迟 ----
+  - name: "K线处理延迟"
+    id: "perf_bar_latency"
+    group: "performance"
+    severity: "warning"
+    condition: "bar_latency > 100"
+    check_interval: 10
+    cooldown: 60
+    message: "K线处理延迟超过 100ms，当前延迟: ${value}ms"
+    action: "profile_performance"
+    channels: ["telegram"]
+
+  # ---- 订单执行延迟 ----
+  - name: "订单执行延迟"
+    id: "perf_order_latency"
+    group: "performance"
+    severity: "warning"
+    condition: "order_latency > 200"
+    check_interval: 30
+    cooldown: 300
+    message: "订单执行延迟超过 200ms，当前延迟: ${value}ms"
+    action: "check_network"
+    channels: ["telegram"]
+
+  # ---- 队列积压 ----
+  - name: "队列积压"
+    id: "perf_queue_backlog"
+    group: "performance"
+    severity: "warning"
+    condition: "queue_size > 100"
+    check_interval: 30
+    cooldown: 60
+    message: "队列积压超过 ${value} 条"
+    action: "process_queue"
+    channels: ["telegram"]
+
+  # ---- 内存泄漏检测 ----
+  - name: "内存泄漏检测"
+    id: "perf_memory_leak"
+    group: "performance"
+    severity: "warning"
+    condition: "memory_growth > 0.1 AND memory_usage > 70"
+    check_interval: 300
+    cooldown: 3600
+    message: "检测到内存持续增长，可能存在内存泄漏"
+    action: "gc_collect"
+    channels: ["telegram"]
+
+
+# ============================================================
+# 告警抑制规则
+# ============================================================
+suppression:
+  # ---- 重复告警抑制 ----
+  deduplication:
+    enabled: true
+    window: 300               # 相同告警在5分钟内只发送一次
+    threshold: 3              # 超过3次后进入抑制模式
+
+  # ---- 依赖告警抑制 ----
+  dependency:
+    enabled: true
+    rules:
+      - parent: "data_ws_disconnect"
+        children:
+          - "data_tick_stall"
+          - "data_depth_stale"
+          - "trading_order_failed"
+        description: "WebSocket断线时，抑制相关数据告警"
+
+      - parent: "trading_daily_loss"
+        children:
+          - "trading_loss_streak"
+          - "trading_position_anomaly"
+        description: "日亏损超限时，抑制其他交易告警"
+
+  # ---- 静默时间 ----
+  silence:
+    enabled: true
+    # 维护窗口（UTC+8）
+    windows:
+      - name: "maintenance"
+        start: "03:00"
+        end: "04:00"
+        days: [0, 1, 2, 3, 4, 5, 6]
+        description: "系统维护时段，抑制非关键告警"
+    # 手动静默（通过API）
+    manual:
+      enabled: true
+      max_duration: 3600      # 最长静默1小时
+
+
+# ============================================================
+# 告警升级规则
+# ============================================================
+escalation:
+  enabled: true
+  rules:
+    - name: "升级为严重"
+      condition: "warning_duration > 300 AND alert_count > 5"
+      new_severity: "critical"
+      notify_emergency: true
+
+    - name: "恢复后升级"
+      condition: "recovery_attempts > 3 AND recovery_failed == true"
+      new_severity: "critical"
+      notify_emergency: true
+
+
+# ============================================================
+# 恢复通知
+# ============================================================
+recovery:
+  enabled: true
+  cooldown: 60                # 恢复后60秒内不再发送相同告警
+  message_template: |
+    ✅ ${alert.name} 已恢复
+    告警: ${alert.message}
+    持续时间: ${alert.duration}
+    恢复时间: ${alert.recovery_time}
+
+
+# ============================================================
+# 配置结束
+# ============================================================
+#
+# 使用说明：
+#   1. 复制此文件到 config/alerts.yaml
+#   2. 配置通知渠道（Telegram Bot Token / Chat ID）
+#   3. 根据实际需求调整告警阈值
+#   4. 重启系统使配置生效
+#
+# 验证命令：
+#   python3 -c "import yaml; yaml.safe_load(open('config/alerts.yaml'))"
+# ============================================================

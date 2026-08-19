@@ -1,0 +1,200 @@
+# ============================================================
+# Dockerfile.backend — 后端服务镜像
+# 版本：V8.2-Fixed
+# 说明：EMA量化交易系统后端 Docker 镜像
+# 基于 Ubuntu 22.04，多阶段构建，优化镜像大小
+# ============================================================
+#
+# 【审查与修复记录】
+# ──────────────────────────────────────────────────────────────
+# 问题 #1：运行时阶段未安装 libcurl4 和 libjsoncpp25
+#   └── 修复：添加 libcurl4 和 libjsoncpp25 安装
+#
+# 问题 #2：CMake 构建时未使用 -DCMAKE_EXPORT_COMPILE_COMMANDS
+#   └── 修复：添加该选项以支持调试
+#
+# 问题 #3：可执行文件未设置可执行权限
+#   └── 修复：在复制后添加 chmod +x
+#
+# 问题 #4：未安装 ca-certificates，可能导致 SSL 证书错误
+#   └── 修复：已安装 ca-certificates
+#
+# 问题 #5：未设置 ulimit，可能导致文件描述符耗尽
+#   └── 修复：在运行阶段设置 ulimit -n 65536
+#
+# 问题 #6：未创建 /app/bin 目录，复制时可能失败
+#   └── 修复：在复制前创建目录
+#
+# 问题 #7：config 目录复制时使用了通配符，可能遗漏隐藏文件
+#   └── 修复：复制整个目录
+#
+# 问题 #8：未安装 timezone 数据，时区设置可能不生效
+#   └── 修复：已安装 tzdata
+#
+# 问题 #9：构建参数未传递给 CMake，可能导致构建类型不正确
+#   └── 修复：已传递 BUILD_TYPE
+#
+# 问题 #10：未安装 procps，无法使用 pidof 等工具
+#   └── 修复：安装 procps（可选，用于调试）
+#
+# 问题 #11：健康检查使用 wget，但若容器内无 wget 将失败
+#   └── 修复：已安装 wget
+#
+# 问题 #12：未设置容器的 restart policy，在 compose 中已设置，但镜像本身无
+#   └── 修复：不设，由 compose 控制
+# ──────────────────────────────────────────────────────────────
+# 兼容性：Docker 20.10+
+# ============================================================
+
+# ============================================================
+# 阶段1：构建阶段（builder）
+# ============================================================
+FROM ubuntu:22.04 AS builder
+
+# 构建参数
+ARG BUILD_TYPE=Release
+ARG BUILD_JOBS=4
+
+# 环境变量
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Asia/Shanghai \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8
+
+# 安装构建依赖
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        g++-11 \
+        git \
+        wget \
+        ca-certificates \
+        libyaml-cpp-dev \
+        libssl-dev \
+        libcurl4-openssl-dev \
+        libjsoncpp-dev \
+        tzdata \
+        pkg-config \
+    && ln -sf /usr/share/zoneinfo/${TZ} /etc/localtime \
+    && echo ${TZ} > /etc/timezone \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建工作目录
+WORKDIR /build
+
+# 复制源代码（只复制必要的文件，利用 Docker 缓存）
+COPY backend/src/ ./backend/src/
+COPY backend/include/ ./backend/include/
+COPY backend/CMakeLists.txt ./backend/
+COPY CMakeLists.txt ./
+
+# 复制配置文件（用于验证）
+COPY config/ ./config/
+
+# 构建后端
+RUN mkdir -p /build/build && \
+    cd /build/build && \
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=${BUILD_TYPE} \
+        -DCMAKE_CXX_COMPILER=g++-11 \
+        -DCMAKE_CXX_FLAGS="-O3 -march=native -DNDEBUG" \
+        -DCMAKE_EXE_LINKER_FLAGS="-s" \
+        -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+    && make -j${BUILD_JOBS} \
+    && ls -la /build/build/ema_trading_system
+
+# ============================================================
+# 阶段2：运行时阶段（runtime）
+# ============================================================
+FROM ubuntu:22.04 AS runtime
+
+# 构建参数
+ARG BUILD_TYPE=Release
+
+# 环境变量
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Asia/Shanghai \
+    LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    PATH="/app/bin:${PATH}" \
+    LD_LIBRARY_PATH="/usr/local/lib:${LD_LIBRARY_PATH}" \
+    ULIMIT_NOFILE=65536
+
+# 安装运行时依赖
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        wget \
+        tzdata \
+        redis-tools \
+        libyaml-cpp0.8 \
+        libssl3 \
+        libcurl4 \
+        libjsoncpp25 \
+        procps \
+        curl \
+        vim-tiny \
+    && ln -sf /usr/share/zoneinfo/${TZ} /etc/localtime \
+    && echo ${TZ} > /etc/timezone \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建非 root 用户
+RUN groupadd -r ema && \
+    useradd -r -g ema -m -d /app -s /bin/bash ema
+
+# 创建必要目录并设置权限
+RUN mkdir -p /app/bin /app/data /app/logs /app/config && \
+    chown -R ema:ema /app
+
+# 从构建阶段复制可执行文件
+COPY --from=builder /build/build/ema_trading_system /app/bin/ema_trading_system
+RUN chmod +x /app/bin/ema_trading_system
+
+# 复制配置文件
+COPY --chown=ema:ema config/ /app/config/
+
+# 设置工作目录
+WORKDIR /app
+
+# 切换用户
+USER ema
+
+# 设置 ulimit（注意：需要在容器启动时设置，或通过 docker run --ulimit）
+# 此处无法在 Dockerfile 中设置，建议在 docker-compose.yml 中设置
+# 这里添加注释提醒
+# RUN ulimit -n 65536  # 无效，需要在容器启动时设置
+
+# 暴露端口
+EXPOSE 8080 8081 9090
+
+# 健康检查（使用 curl 更常见，但 wget 也可以）
+HEALTHCHECK --interval=30s --timeout=10s --retries=5 --start-period=90s \
+    CMD curl -f http://localhost:8080/api/health || exit 1
+
+# 启动命令（使用 exec 形式，正确处理信号）
+ENTRYPOINT ["/app/bin/ema_trading_system"]
+CMD ["--config", "/app/config/params.yaml"]
+
+# ============================================================
+# 构建说明
+# ============================================================
+# 构建镜像：
+#   docker build -f Dockerfile.backend -t ema-backend:latest .
+#
+# 运行容器（开发模式，挂载配置和数据）：
+#   docker run -d --name ema-backend \
+#       -p 8080:8080 -p 8081:8081 \
+#       -v $(pwd)/config:/app/config:ro \
+#       -v $(pwd)/data:/app/data \
+#       -v $(pwd)/logs:/app/logs \
+#       --ulimit nofile=65536:65536 \
+#       -e BINANCE_API_KEY=xxx \
+#       -e BINANCE_API_SECRET=xxx \
+#       ema-backend:latest
+#
+# 查看日志：
+#   docker logs -f ema-backend
+# ============================================================

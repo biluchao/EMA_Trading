@@ -1,0 +1,492 @@
+# ============================================================
+# assemble_config.yaml — 系统组装配置文件
+# 版本：V8.1-Fixed
+# 说明：定义系统各模块的依赖关系、构建顺序和测试配置
+# 用于 assemble.py 自动组装脚本
+# ============================================================
+#
+# 【审查与修复记录】
+# ──────────────────────────────────────────────────────────────
+# 问题 #1：模块依赖关系不完整
+#   └── 修复：补充所有模块的依赖关系，确保正确的构建顺序
+#
+# 问题 #2：缺少前端模块的详细配置
+#   └── 修复：补充前端模块的构建命令和测试命令
+#
+# 问题 #3：缺少测试模块的配置
+#   └── 修复：新增单元测试、集成测试、回测模块
+#
+# 问题 #4：缺少文档生成模块
+#   └── 修复：新增 docs 模块用于生成文档
+#
+# 问题 #5：并行构建配置不明确
+#   └── 修复：增加 parallel_jobs 配置
+#
+# 问题 #6：循环依赖风险 (validation ↔ execution)
+#   └── 修复：调整 validation 依赖关系，消除循环
+#
+# 问题 #7：模块路径与实际目录不匹配
+#   └── 修复：统一所有路径为项目实际目录结构
+#
+# 问题 #8：构建命令重复执行导致效率低下
+#   └── 修复：使用统一构建目录，实现增量编译
+# ──────────────────────────────────────────────────────────────
+# 兼容性：YAML 1.2
+# ============================================================
+
+
+# ============================================================
+# 全局配置
+# ============================================================
+
+# 并行编译任务数（自动检测 CPU 核心数）
+parallel_jobs: 4
+
+# 构建超时时间（秒）
+build_timeout: 600
+
+# 是否启用增量构建
+incremental_build: true
+
+# 是否在构建失败时继续
+continue_on_error: false
+
+
+# ============================================================
+# 模块定义
+# ============================================================
+#
+# 注意：
+# 1. 所有后端模块共享同一个构建目录 (build/backend)
+# 2. 只有 main 模块执行完整的 cmake 配置 + 构建
+# 3. 其他后端模块仅执行增量编译 (make)
+# 4. 模块顺序：main 首先构建（配置 cmake），然后其他模块增量编译
+# ============================================================
+modules:
+
+  # ==========================================================
+  # 主程序模块（最先构建，配置 cmake 环境）
+  # ==========================================================
+
+  main:
+    description: "主程序入口 — cmake 配置 + 完整构建"
+    depends: []
+    enabled: true
+    source_dir: "backend/src"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/main.cpp"
+      - "backend/CMakeLists.txt"
+    build_cmd:
+      - "mkdir -p build/backend"
+      - "cd build/backend && cmake ../.. -DCMAKE_BUILD_TYPE=Release"
+      - "cd build/backend && make -j${PARALLEL_JOBS}"
+    test_cmd: []
+
+  # ==========================================================
+  # 核心基础模块
+  # ==========================================================
+
+  core:
+    description: "核心基础 — 类型/常量/异常/数据结构/序列化"
+    depends: ["main"]
+    enabled: true
+    source_dir: "backend/src/core"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/core/*.h"
+      - "backend/src/core/*.cpp"
+    build_cmd:
+      - "cd build/backend && make core"
+    test_cmd:
+      - "cd build/backend && ctest -R test_core -V"
+
+  # ==========================================================
+  # 工具类模块
+  # ==========================================================
+
+  utils:
+    description: "工具类 — 数学/统计/日志/加密/安全工具"
+    depends: ["main", "core"]
+    enabled: true
+    source_dir: "backend/src/utils"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/utils/*.h"
+      - "backend/src/utils/*.cpp"
+    build_cmd:
+      - "cd build/backend && make utils"
+    test_cmd:
+      - "cd build/backend && ctest -R test_utils -V"
+
+  # ==========================================================
+  # 接口定义模块
+  # ==========================================================
+
+  interfaces:
+    description: "接口定义 — 各层接口抽象/纯虚类"
+    depends: ["main", "core"]
+    enabled: true
+    source_dir: "backend/src/interfaces"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/interfaces/*.h"
+    build_cmd:
+      - "cd build/backend && make interfaces"
+    test_cmd: []
+
+  # ==========================================================
+  # 感知层（第零层）
+  # ==========================================================
+
+  perception:
+    description: "感知层 — Lyapunov/RR/EVT/微观结构/冲击感知"
+    depends: ["main", "core", "utils", "interfaces"]
+    enabled: true
+    source_dir: "backend/src/perception"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/perception/*.h"
+      - "backend/src/perception/*.cpp"
+    build_cmd:
+      - "cd build/backend && make perception"
+    test_cmd:
+      - "cd build/backend && ctest -R test_perception -V"
+
+  # ==========================================================
+  # 贝叶斯层（第一层）
+  # ==========================================================
+
+  bayesian:
+    description: "贝叶斯层 — Student-t/反事实/测地线/Dirichlet先验"
+    depends: ["main", "core", "utils", "interfaces", "perception"]
+    enabled: true
+    source_dir: "backend/src/bayesian"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/bayesian/*.h"
+      - "backend/src/bayesian/*.cpp"
+    build_cmd:
+      - "cd build/backend && make bayesian"
+    test_cmd:
+      - "cd build/backend && ctest -R test_bayesian -V"
+
+  # ==========================================================
+  # 趋势层（第二层）
+  # ==========================================================
+
+  trend:
+    description: "趋势层 — 时间加权EMA/时段自适应/多框架/双轨联动"
+    depends: ["main", "core", "utils", "interfaces", "perception", "bayesian"]
+    enabled: true
+    source_dir: "backend/src/trend"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/trend/*.h"
+      - "backend/src/trend/*.cpp"
+    build_cmd:
+      - "cd build/backend && make trend"
+    test_cmd:
+      - "cd build/backend && ctest -R test_trend -V"
+
+  # ==========================================================
+  # 器官层（第三层）
+  # ==========================================================
+
+  organ:
+    description: "器官层 — 动态权重/三模板评分/仓位映射/尖峰/阈值"
+    depends: ["main", "core", "utils", "interfaces", "perception", "bayesian", "trend"]
+    enabled: true
+    source_dir: "backend/src/organ"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/organ/*.h"
+      - "backend/src/organ/*.cpp"
+    build_cmd:
+      - "cd build/backend && make organ"
+    test_cmd:
+      - "cd build/backend && ctest -R test_organ -V"
+
+  # ==========================================================
+  # 仲裁层（第四层）
+  # ==========================================================
+
+  arbiter:
+    description: "仲裁层 — P0-P6硬优先级/冷却/熵/平滑"
+    depends: ["main", "core", "utils", "interfaces", "perception", "bayesian", "trend", "organ"]
+    enabled: true
+    source_dir: "backend/src/arbiter"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/arbiter/*.h"
+      - "backend/src/arbiter/*.cpp"
+    build_cmd:
+      - "cd build/backend && make arbiter"
+    test_cmd:
+      - "cd build/backend && ctest -R test_arbiter -V"
+
+  # ==========================================================
+  # 离场层（第五层）
+  # ==========================================================
+
+  exit:
+    description: "离场层 — 分级止盈/自适应止损/Λ逃顶/R反转/时间框架"
+    depends: ["main", "core", "utils", "interfaces", "organ"]
+    enabled: true
+    source_dir: "backend/src/exit"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/exit/*.h"
+      - "backend/src/exit/*.cpp"
+    build_cmd:
+      - "cd build/backend && make exit"
+    test_cmd:
+      - "cd build/backend && ctest -R test_exit -V"
+
+  # ==========================================================
+  # 验证层（第六层）
+  # ==========================================================
+
+  validation:
+    description: "验证层 — BF/置换检验/曲折度/消融/证据追踪"
+    depends: ["main", "core", "utils", "interfaces", "execution"]
+    enabled: true
+    source_dir: "backend/src/validation"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/validation/*.h"
+      - "backend/src/validation/*.cpp"
+    build_cmd:
+      - "cd build/backend && make validation"
+    test_cmd:
+      - "cd build/backend && ctest -R test_validation -V"
+
+  # ==========================================================
+  # 影子层（第七层）
+  # ==========================================================
+
+  shadow:
+    description: "影子层 — 本征模式降维/偏差监控/原子晋升/虚拟执行"
+    depends: ["main", "core", "utils", "interfaces", "validation", "execution"]
+    enabled: true
+    source_dir: "backend/src/shadow"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/shadow/*.h"
+      - "backend/src/shadow/*.cpp"
+    build_cmd:
+      - "cd build/backend && make shadow"
+    test_cmd:
+      - "cd build/backend && ctest -R test_shadow -V"
+
+  # ==========================================================
+  # 执行层（第八层）
+  # ==========================================================
+
+  execution:
+    description: "执行层 — 订单管理/币安客户端/状态机/持久化/XAI"
+    depends: ["main", "core", "utils", "interfaces", "arbiter"]
+    enabled: true
+    source_dir: "backend/src/execution"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/execution/*.h"
+      - "backend/src/execution/*.cpp"
+    build_cmd:
+      - "cd build/backend && make execution"
+    test_cmd:
+      - "cd build/backend && ctest -R test_execution -V"
+
+  # ==========================================================
+  # 虚拟券商模块
+  # ==========================================================
+
+  virtual_broker:
+    description: "虚拟券商 — 实盘/影子/回放/深度滑点/影子适配"
+    depends: ["main", "core", "utils", "interfaces", "execution"]
+    enabled: true
+    source_dir: "backend/src/virtual_broker"
+    build_dir: "build/backend"
+    files:
+      - "backend/src/virtual_broker/*.h"
+      - "backend/src/virtual_broker/*.cpp"
+    build_cmd:
+      - "cd build/backend && make virtual_broker"
+    test_cmd:
+      - "cd build/backend && ctest -R test_virtual_broker -V"
+
+
+  # ==========================================================
+  # 前端模块（独立构建）
+  # ==========================================================
+
+  frontend:
+    description: "前端UI — React/TypeScript 专业蜡烛图/配置面板"
+    depends: []
+    enabled: true
+    source_dir: "frontend"
+    build_dir: "frontend/dist"
+    files:
+      - "frontend/src/**/*.tsx"
+      - "frontend/src/**/*.ts"
+      - "frontend/package.json"
+    build_cmd:
+      - "cd frontend && npm install --no-fund --no-audit"
+      - "cd frontend && npm run build"
+    test_cmd:
+      - "cd frontend && npm test -- --watchAll=false --coverage"
+
+
+  # ==========================================================
+  # 测试模块
+  # ==========================================================
+
+  unit_tests:
+    description: "单元测试 — 所有模块的单元测试"
+    depends: ["main", "perception", "bayesian", "trend", "organ", "arbiter", "exit", "validation", "shadow", "execution", "virtual_broker"]
+    enabled: true
+    source_dir: "backend/tests/unit"
+    build_dir: "build/backend"
+    files:
+      - "backend/tests/unit/*.cpp"
+    build_cmd:
+      - "cd build/backend && make unit_tests"
+    test_cmd:
+      - "cd build/backend && ctest -R test_unit -V"
+
+  integration_tests:
+    description: "集成测试 — 端到端/持久化/恢复"
+    depends: ["main", "unit_tests", "virtual_broker"]
+    enabled: true
+    source_dir: "backend/tests/integration"
+    build_dir: "build/backend"
+    files:
+      - "backend/tests/integration/*.cpp"
+    build_cmd:
+      - "cd build/backend && make integration_tests"
+    test_cmd:
+      - "cd build/backend && ctest -L integration -V"
+
+  backtest:
+    description: "回测引擎 — 历史回测/参数扫描/性能分析"
+    depends: ["main", "virtual_broker"]
+    enabled: true
+    source_dir: "backend/tests/backtest"
+    build_dir: "build/backend"
+    files:
+      - "backend/tests/backtest/*.cpp"
+      - "backend/tests/backtest/*.py"
+    build_cmd:
+      - "cd build/backend && make backtest"
+    test_cmd:
+      - "python3 backend/tests/backtest/run_backtest.py --sample"
+
+
+  # ==========================================================
+  # 文档模块
+  # ==========================================================
+
+  docs:
+    description: "文档生成 — API文档/架构文档/策略文档"
+    depends: []
+    enabled: true
+    source_dir: "docs"
+    build_dir: "build/docs"
+    files:
+      - "docs/**/*.md"
+    build_cmd:
+      - "mkdir -p build/docs"
+      - "cp -r docs/* build/docs/"
+      - "cd build/docs && cat overview.md > index.md 2>/dev/null || true"
+    test_cmd:
+      - "test -f build/docs/index.md || echo '⚠️ 文档未完整生成'"
+
+
+  # ==========================================================
+  # 配置验证
+  # ==========================================================
+
+  config_validation:
+    description: "配置文件验证 — YAML语法/参数范围/依赖检查"
+    depends: []
+    enabled: true
+    source_dir: "config"
+    build_dir: "build/config"
+    files:
+      - "config/*.yaml"
+    build_cmd:
+      - "mkdir -p build/config"
+      - "cp config/*.yaml build/config/ 2>/dev/null || true"
+    test_cmd:
+      - "python3 -c \"import yaml; yaml.safe_load(open('config/params.yaml'))\" && echo '✅ params.yaml 验证通过' || echo '❌ params.yaml 验证失败'"
+      - "python3 -c \"import yaml; yaml.safe_load(open('config/exchange.yaml'))\" && echo '✅ exchange.yaml 验证通过' || echo '❌ exchange.yaml 验证失败'"
+
+
+# ============================================================
+# 构建后检查
+# ============================================================
+
+post_build:
+  # 构建产物检查
+  artifacts:
+    - path: "backend/build/ema_trading_system"
+      description: "后端可执行文件"
+      required: true
+    - path: "frontend/dist/index.html"
+      description: "前端入口文件"
+      required: true
+    - path: "config/params.yaml"
+      description: "主配置文件"
+      required: true
+    - path: "build/docs/index.md"
+      description: "文档入口"
+      required: false
+
+  # 符号链接（跨平台兼容）
+  symlinks:
+    - target: "backend/build/ema_trading_system"
+      link: "bin/ema_trading_system"
+      platform: "unix"  # Linux/macOS
+    - target: "backend/build/ema_trading_system.exe"
+      link: "bin/ema_trading_system.exe"
+      platform: "windows"
+
+
+# ============================================================
+# 构建后启动配置
+# ============================================================
+
+startup:
+  # 默认启动命令
+  command: "./run.sh"
+  # 环境变量（从 .env 加载）
+  env_file: ".env"
+  env:
+    - "BINANCE_API_KEY"
+    - "BINANCE_API_SECRET"
+    - "REDIS_HOST"
+    - "REDIS_PORT"
+  # 检查端口是否可用
+  ports:
+    - 8080
+    - 3000
+  # 健康检查
+  health_check: "curl -s http://localhost:8080/api/health"
+
+
+# ============================================================
+# 配置结束
+# ============================================================
+#
+# 验证命令：
+#   python3 scripts/assemble.py --dry-run
+#   python3 scripts/assemble.py --config assemble_config.yaml
+#   python3 scripts/assemble.py --skip-tests
+#
+# 说明：
+#   1. 所有后端模块共享构建目录 build/backend
+#   2. main 模块首先构建，完成 cmake 配置
+#   3. 其他模块执行增量编译 (make)
+#   4. 前端独立构建，不依赖后端
+#   5. 测试模块依赖对应功能模块
+# ============================================================

@@ -1,0 +1,332 @@
+# ============================================================
+# heart_config.yaml — 心法驱动引擎配置
+# 版本：V8.4-Fixed
+# 说明：定义6条核心心法的参数、阈值和决策规则
+# 心法引擎驱动所有策略决策，是系统的第一性原理
+# ============================================================
+#
+# 【审查与修复记录 V8.4】
+# ──────────────────────────────────────────────────────────────
+# 问题 #1：H-03 quality.boost_factor 未指定有效范围
+#   └── 修复：增加 min/max 范围，防止过度调整
+#
+# 问题 #2：H-04 session_scaling 与 resonance.boost_factor 叠乘可能产生过大仓位
+#   └── 修复：增加最终结果限幅 max_position 和 min_position
+#
+# 问题 #3：H-06 volatility_mapping 区间边界有重叠风险
+#   └── 修复：明确定义各区间边界，使用低/正常/高/极端四级
+#
+# 问题 #4：H-02 fast_switch_threshold 过于敏感
+#   └── 修复：调整默认值为 0.8，增加 min/max 范围
+#
+# 问题 #5：H-06 lambda_adjustment 与止盈的联动关系不明确
+#   └── 修复：增加详细的联动计算公式说明
+#
+# 问题 #6：H-05 trailing_stop.activation_profit 在低波动时可能无法触发
+#   └── 修复：增加低波动时的激活阈值调整
+#
+# 问题 #7：H-06 volatility_mapping 缺少回滞机制防止频繁切换
+#   └── 修复：增加 hysteresis 回滞配置
+#
+# 问题 #8：H-02 模式切换缺少切换后的验证机制
+#   └── 修复：增加 switch_validation_bars 配置
+#
+# 问题 #9：部分参数缺少单位说明
+#   └── 修复：在注释中明确所有参数的单位
+#
+# 问题 #10：心法间联动 interdependence 未定义冲突解决策略
+#   └── 修复：增加 conflict_resolution 策略
+# ──────────────────────────────────────────────────────────────
+# 兼容性：YAML 1.2
+# ============================================================
+
+# ============================================================
+# 心法引擎全局配置
+# ============================================================
+heart_engine:
+  enabled: true                          # 心法引擎总开关
+  log_level: "INFO"                      # DEBUG | INFO | WARN | ERROR
+  priority_chain:                        # 心法执行优先级（高→低）
+    - H01_DATA_IS_FOUNDATION             # 数据质量优先
+    - H02_VOLATILITY_DICTATES_EMA        # 波动率决定EMA
+    - H05_STOP_LOSS_CALIBRATES           # 止损校准
+    - H06_PROFIT_HARVESTS_BY_WAVE        # 利润收割
+    - H03_THRESHOLD_BREATHES             # 阈值呼吸
+    - H04_POSITION_IS_CONFIDENCE         # 仓位信心（最后执行）
+  # 心法间联动（后一条心法可覆盖前一条的部分参数）
+  interdependence:
+    - "H02_VOLATILITY_DICTATES_EMA -> H05_STOP_LOSS_CALIBRATES"
+    - "H02_VOLATILITY_DICTATES_EMA -> H06_PROFIT_HARVESTS_BY_WAVE"
+    - "H01_DATA_IS_FOUNDATION -> H03_THRESHOLD_BREATHES"
+    - "H01_DATA_IS_FOUNDATION -> H04_POSITION_IS_CONFIDENCE"
+  # 冲突解决策略
+  conflict_resolution:
+    strategy: "highest_priority_wins"    # highest_priority_wins | average | min | max
+    # 当两条心法产生矛盾时，采用优先级更高的心法结果
+
+# ============================================================
+# H-01：数据是根本，策略是映射
+# ============================================================
+H01_DATA_IS_FOUNDATION:
+  enabled: true
+  description: "数据质量决定策略边界"
+  # 数据质量评分阈值 (0-1)
+  quality:
+    min_acceptable: 0.5                # 最低可接受质量
+    high_quality_threshold: 0.8        # 高质量阈值
+    low_quality_penalty: 0.5           # 低质量惩罚系数（仓位×0.5）
+    # 质量评分范围
+    range:
+      min: 0.0
+      max: 1.0
+  # 数据断流处理
+  data_stall:
+    max_age_seconds: 10                # 最大数据空闲时间（秒）
+    action: "pause_trading"            # pause_trading | reduce_position | ignore
+    # 断流恢复后
+    recovery:
+      wait_bars: 3                     # 恢复后等待K线数
+      sync_positions: true             # 是否同步持仓
+  # 数据质量影响范围
+  impact:
+    position_scaling: true             # 是否影响仓位缩放
+    threshold_scaling: true            # 是否影响阈值调整
+
+# ============================================================
+# H-02：波动率决定EMA优先级
+# ============================================================
+H02_VOLATILITY_DICTATES_EMA:
+  enabled: true
+  description: "波动率决定EMA26/EMA60优先级"
+  # 波动率阈值（ATR/Price，单位：百分比）
+  thresholds:
+    low_volatility: 0.018              # 1.8% — 低于此值使用EMA60主导
+    high_volatility: 0.032             # 3.2% — 高于此值使用EMA26主导
+    hysteresis: 0.002                  # 0.2% 回滞区间，防止频繁切换
+    # 范围限制
+    range:
+      min: 0.005
+      max: 0.100
+  # EMA周期映射
+  ema_periods:
+    ema60_primary:                     # 低波动模式
+      ema26_period: 34
+      ema60_period: 80
+    dual_coordinated:                  # 过渡模式
+      ema26_period: 26
+      ema60_period: 60
+    ema26_primary:                     # 高波动模式
+      ema26_period: 20
+      ema60_period: 50
+  # 模式切换锁定
+  mode_lock:
+    enabled: true
+    lock_bars: 5                       # 切换后锁定5根K线
+    fast_switch_threshold: 0.8         # 波动率变化超过80%时强制切换
+    # 范围
+    fast_switch_range:
+      min: 0.3
+      max: 2.0
+  # 切换验证
+  switch_validation_bars: 3            # 切换后验证K线数
+
+# ============================================================
+# H-03：阈值是随市场呼吸的门
+# ============================================================
+H03_THRESHOLD_BREATHES:
+  enabled: true
+  description: "阈值随波动率、质量、共振动态呼吸"
+  # 基础阈值（评分范围 0-100）
+  base_threshold: 65.0                 # 评分基础门槛
+  range:
+    min: 50.0
+    max: 85.0
+  # 波动率调整（对数缩放）
+  volatility:
+    sensitivity: 0.15                  # 敏感系数 (0.05-0.30)
+    reference_volatility: 0.02         # 参考波动率 (2%)
+    # 范围
+    sensitivity_range:
+      min: 0.05
+      max: 0.30
+  # 质量调整（每0.1质量减2分）
+  quality:
+    boost_factor: 2.0                  # 质量加分系数
+    # 范围
+    boost_range:
+      min: 0.5
+      max: 4.0
+  # 共振调整（共振时阈值降低）
+  resonance:
+    boost_factor: 5.0                  # 共振减分
+    # 范围
+    boost_range:
+      min: 2.0
+      max: 10.0
+  # 平滑（防止阈值跳变）
+  smoothing:
+    enabled: true
+    alpha: 0.2                         # 平滑系数 (0-1)，越大越平滑
+    max_change_per_bar: 3.0            # 每根K线最大阈值变化（分）
+
+# ============================================================
+# H-04：仓位是信心的函数
+# ============================================================
+H04_POSITION_IS_CONFIDENCE:
+  enabled: true
+  description: "仓位由评分、质量、时段、共振共同决定"
+  # S型映射参数
+  sigmoid:
+    slope: 0.15                        # S型曲线斜率 (0.05-0.30)
+    center_base: 75.0                  # 基础中心 (70-80)
+    center_template_A: 77.0            # 模板A中心（突破）
+    center_template_B: 75.0            # 模板B中心（回踩）
+    center_template_C: 72.0            # 模板C中心（回归）
+  # 质量加权
+  quality:
+    min_weight: 0.3                    # 最低质量权重
+    max_weight: 1.0                    # 最高质量权重
+  # 时段缩放（由 session_manager 提供）
+  session_scaling:
+    asian: 0.7
+    europe: 1.0
+    us: 1.2
+    weekend: 0.3
+  # 共振增强
+  resonance:
+    boost_factor: 1.2                  # 共振时仓位×1.2
+    boost_range:
+      min: 1.0
+      max: 1.5
+  # 仓位限幅（最终结果硬限制）
+  limits:
+    max_position: 3.0                  # 全局最大仓位
+    min_position: 0.0
+    change_rate: 0.2                   # 相邻K线变化率上限 (20%)
+
+# ============================================================
+# H-05：止损在波动中校准
+# ============================================================
+H05_STOP_LOSS_CALIBRATES:
+  enabled: true
+  description: "止损倍数随波动率和EMA模式自适应"
+  # 基础止损（ATR倍数）
+  base_multiplier: 1.2
+  range:
+    min: 0.3
+    max: 3.0
+  # 波动率调整
+  volatility:
+    adjustment: "sqrt"                 # sqrt | linear | log
+    reference_volatility: 0.02
+  # EMA模式调整
+  mode_factors:
+    ema60_primary: 0.85                # 低波动时收紧止损
+    dual_coordinated: 1.0
+    ema26_primary: 1.15                # 高波动时放宽止损
+  # 仓位类型调整
+  order_type_factors:
+    entry: 1.0
+    second: 0.85                       # 二加更紧
+    third: 0.70                        # 三加最紧
+  # 趋势强度调整
+  trend_adjustment:
+    strong_trend: 1.1                  # 强趋势放宽
+    weak_trend: 0.9                    # 弱趋势收紧
+    threshold: 0.6                     # 趋势强度阈值 (>0.6 为强趋势)
+  # 移动止损
+  trailing_stop:
+    enabled: true
+    activation_profit: 1.5             # 浮盈1.5×ATR后激活
+    # 低波动时激活阈值降低
+    low_vol_activation_factor: 0.7     # 低波动时激活阈值为 1.5×0.7 = 1.05
+    trailing_ratio: 0.3                # 回撤30%离场
+    update_frequency: 1                # 每根K线更新
+
+# ============================================================
+# H-06：利润按波动节奏分级收割
+# ============================================================
+H06_PROFIT_HARVESTS_BY_WAVE:
+  enabled: true
+  description: "止盈倍数随波动率、趋势、Λ动态调整"
+  # 基础止盈倍数（ATR倍数）
+  base_multiplier: 3.0
+  # 波动率映射（边界互斥，带回滞）
+  volatility_mapping:
+    low:                               # <1.5%
+      threshold: 0.015
+      take_profit: 2.5
+      stop_loss: 0.9
+    normal:                            # 1.5%-3.5%
+      threshold_low: 0.015
+      threshold_high: 0.035
+      take_profit: 3.5
+      stop_loss: 1.2
+    high:                              # 3.5%-5.5%
+      threshold_low: 0.035
+      threshold_high: 0.055
+      take_profit: 4.5
+      stop_loss: 1.5
+    extreme:                           # >5.5%
+      threshold: 0.055
+      take_profit: 5.5
+      stop_loss: 1.8
+    # 回滞防止频繁切换
+    hysteresis: 0.002
+  # 分级止盈（百分比）
+  tiered_take_profit:
+    enabled: true
+    levels:
+      - ratio: 1.5                     # 第一档止盈 (ATR倍数)
+        close_percent: 0.30            # 平仓30%
+      - ratio: 3.0
+        close_percent: 0.40            # 平仓40%
+      - ratio: 5.0
+        close_percent: 0.30            # 平仓30%
+  # Λ联动 (Λ越高，止盈目标越近)
+  lambda_adjustment:
+    enabled: true
+    adjustment_factor: 0.5             # 最大调整幅度 (止盈×0.5)
+    threshold: 50.0                    # Λ超过此值时开始调整
+    # 联动公式: adjusted_profit = base_profit * (1 - (lambda - threshold) / 100 * adjustment_factor)
+    # 示例: base=3.0, lambda=70, threshold=50, factor=0.5 → 3.0 * (1 - 20/100*0.5) = 2.7
+  # 趋势强度调整
+  trend_adjustment:
+    strong_trend: 1.2                  # 强趋势放大止盈
+    weak_trend: 0.8                    # 弱趋势缩小止盈
+    threshold: 0.6                     # 趋势强度阈值
+  # 绝对止盈下限
+  min_take_profit: 1.5                 # 最低止盈倍数（防过小）
+
+# ============================================================
+# 心法调试与监控
+# ============================================================
+debug:
+  enabled: false
+  # 心法决策追踪
+  trace:
+    enabled: false
+    max_history: 1000                  # 保留最近1000条心法决策记录
+  # 心法性能统计
+  statistics:
+    enabled: true
+    update_interval: 60                # 每60秒更新统计
+  # 心法冲突检测
+  conflict_detection:
+    enabled: true
+    log_warnings: true
+
+# ============================================================
+# 配置结束
+# ============================================================
+#
+# 使用说明：
+#   1. 复制此文件到 config/heart_config.yaml
+#   2. 根据策略风格调整各心法参数
+#   3. 可通过 enabled: false 临时禁用心法（调试用）
+#   4. 心法优先级 chain 决定决策顺序，请谨慎修改
+#   5. 冲突解决策略 conflict_resolution.strategy 决定矛盾时的处理方式
+#
+# 验证命令：
+#   python3 -c "import yaml; yaml.safe_load(open('config/heart_config.yaml'))"
+# ============================================================

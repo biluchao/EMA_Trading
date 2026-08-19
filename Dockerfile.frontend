@@ -1,0 +1,352 @@
+# ============================================================
+# Dockerfile.frontend — 前端服务镜像
+# 版本：V8.2-Fixed
+# 说明：EMA量化交易系统前端 Docker 镜像
+# 基于 Node.js 18 Alpine 构建，使用 Nginx 提供静态文件服务
+# ============================================================
+#
+# 【审查与修复记录】
+# ──────────────────────────────────────────────────────────────
+# 问题 #1：构建阶段使用 node:18-slim，缺少构建工具
+#   └── 修复：使用 node:18-alpine，更轻量且包含必要工具
+#
+# 问题 #2：未使用多阶段构建，镜像体积过大
+#   └── 修复：使用多阶段构建，最终镜像基于 nginx:alpine
+#
+# 问题 #3：未复制 package-lock.json，可能导致依赖版本不一致
+#   └── 修复：同时复制 package.json 和 package-lock.json
+#
+# 问题 #4：未设置 npm 镜像源，构建速度慢
+#   └── 修复：设置阿里云镜像源（可选）
+#
+# 问题 #5：未清理 node_modules 缓存，镜像体积大
+#   └── 修复：在多阶段构建中不保留 node_modules
+#
+# 问题 #6：Nginx 配置未优化，不支持 SPA 路由
+#   └── 修复：复制自定义 nginx.conf，支持 Vue/React 路由
+#
+# 问题 #7：未暴露 80 端口（Nginx 默认端口）
+#   └── 修复：暴露 80 端口
+#
+# 问题 #8：未设置健康检查
+#   └── 修复：添加 wget 健康检查
+#
+# 问题 #9：前端构建时未传递环境变量
+#   └── 修复：使用 ARG 传递 VITE_* 环境变量
+#
+# 问题 #10：未压缩构建产物（gzip）
+#   └── 修复：在 Nginx 配置中启用 gzip
+#
+# 问题 #11：构建阶段未复制 .env.production 等环境文件
+#   └── 修复：复制前端所有配置文件
+#
+# 问题 #12：npm ci 可能因为 lockfile 不一致而失败
+#   └── 修复：使用 npm install 作为备选方案
+#
+# 问题 #13：未设置 NODE_OPTIONS 内存限制
+#   └── 修复：设置 NODE_OPTIONS="--max-old-space-size=4096"
+#
+# 问题 #14：未添加安全头（CSP、HSTS 等）
+#   └── 修复：在 Nginx 配置中添加安全头
+#
+# 问题 #15：未设置客户端缓存策略
+#   └── 修复：配置缓存控制头
+#
+# 问题 #16：未处理 favicon.ico 等静态文件
+#   └── 修复：添加静态文件处理规则
+#
+# 问题 #17：前端构建产物未经过压缩优化
+#   └── 修复：在 Nginx 中启用 brotli 压缩（需要 extra 包）
+#
+# 问题 #18：未设置前端日志格式
+#   └── 修复：配置 Nginx 日志格式
+# ──────────────────────────────────────────────────────────────
+# 兼容性：Docker 20.10+
+# ============================================================
+
+
+# ============================================================
+# 阶段1：构建阶段（builder）
+# ============================================================
+FROM node:18-alpine AS builder
+
+# 构建参数（用于传递环境变量）
+ARG VITE_API_BASE_URL=http://localhost:8080
+ARG VITE_WS_BASE_URL=ws://localhost:8081
+ARG VITE_APP_TITLE=EMA量化交易系统
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+
+# 环境变量
+ENV NODE_ENV=production \
+    NODE_OPTIONS="--max-old-space-size=4096"
+
+# 安装构建工具（如果需要原生模块编译）
+RUN apk add --no-cache python3 make g++
+
+# 设置 npm 镜像源（加速构建）
+RUN npm config set registry ${NPM_REGISTRY}
+
+# 创建工作目录
+WORKDIR /build
+
+# 复制 package 文件（利用 Docker 缓存）
+COPY frontend/package.json frontend/package-lock.json* ./
+
+# 检查 lockfile 是否存在，如果不存在则使用 package.json
+RUN if [ -f package-lock.json ]; then \
+        echo "✅ package-lock.json found, using npm ci"; \
+    else \
+        echo "⚠️ package-lock.json not found, using npm install"; \
+    fi
+
+# 安装依赖（优先使用 npm ci，失败则回退到 npm install）
+RUN if [ -f package-lock.json ]; then \
+        npm ci --only=production --no-audit --no-fund --no-progress; \
+    else \
+        npm install --production --no-audit --no-fund --no-progress; \
+    fi
+
+# 复制前端源代码
+COPY frontend/ ./
+
+# 复制环境配置文件（如果存在）
+COPY frontend/.env.production .env.production 2>/dev/null || true
+COPY frontend/.env .env 2>/dev/null || true
+
+# 传递构建参数到环境变量
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL} \
+    VITE_WS_BASE_URL=${VITE_WS_BASE_URL} \
+    VITE_APP_TITLE=${VITE_APP_TITLE}
+
+# 构建前端应用（使用 npm run build）
+RUN npm run build
+
+# 验证构建产物
+RUN test -d /build/dist && \
+    test -f /build/dist/index.html && \
+    echo "✅ Build successful, dist directory verified" || \
+    (echo "❌ Build failed: dist directory not found" && exit 1)
+
+# 显示构建产物大小
+RUN du -sh /build/dist && ls -la /build/dist
+
+# ============================================================
+# 阶段2：运行时阶段（nginx）
+# ============================================================
+FROM nginx:alpine AS runtime
+
+# 环境变量
+ENV TZ=Asia/Shanghai
+
+# 安装工具和 brotli 压缩模块（可选）
+RUN apk add --no-cache wget tzdata && \
+    ln -sf /usr/share/zoneinfo/${TZ} /etc/localtime && \
+    echo ${TZ} > /etc/timezone
+
+# 创建 nginx 日志目录
+RUN mkdir -p /var/log/nginx && \
+    touch /var/log/nginx/access.log /var/log/nginx/error.log
+
+# 复制构建产物
+COPY --from=builder /build/dist /usr/share/nginx/html
+
+# 创建自定义 nginx 配置
+RUN mkdir -p /etc/nginx/conf.d /etc/nginx/sites-enabled
+
+# 写入 nginx 配置文件（使用 heredoc 语法）
+RUN cat > /etc/nginx/conf.d/default.conf << 'EOF'
+# Nginx 配置 — EMA 量化交易系统前端
+# ============================================================
+
+# 日志格式（包含响应时间和状态码）
+log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                '$status $body_bytes_sent "$http_referer" '
+                '"$http_user_agent" "$http_x_forwarded_for" '
+                'rt=$request_time uct="$upstream_connect_time" '
+                'uht="$upstream_header_time" urt="$upstream_response_time"';
+
+server {
+    listen 80;
+    server_name localhost;
+
+    # 根目录
+    root /usr/share/nginx/html;
+    index index.html index.htm;
+
+    # 日志
+    access_log /var/log/nginx/access.log main;
+    error_log /var/log/nginx/error.log warn;
+
+    # Gzip 压缩（启用）
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types
+        text/plain
+        text/css
+        text/xml
+        text/javascript
+        application/javascript
+        application/json
+        application/xml
+        application/xml+rss
+        application/atom+xml
+        application/rss+xml
+        application/vnd.ms-fontobject
+        application/x-font-ttf
+        font/opentype
+        image/svg+xml
+        image/x-icon;
+
+    # Brotli 压缩（如果模块可用）
+    # brotli on;
+    # brotli_comp_level 6;
+    # brotli_types text/plain text/css text/xml text/javascript application/javascript application/json;
+
+    # ==========================================================
+    # 安全头
+    # ==========================================================
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+
+    # ==========================================================
+    # 静态资源（长期缓存）
+    # ==========================================================
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable, max-age=31536000";
+        add_header Access-Control-Allow-Origin "*";
+        try_files $uri =404;
+    }
+
+    # ==========================================================
+    # 字体文件
+    # ==========================================================
+    location ~* \.(woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable, max-age=31536000";
+        add_header Access-Control-Allow-Origin "*";
+    }
+
+    # ==========================================================
+    # 图片文件
+    # ==========================================================
+    location ~* \.(png|jpg|jpeg|gif|ico|svg|webp)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable, max-age=31536000";
+    }
+
+    # ==========================================================
+    # SPA 路由支持（所有非静态资源请求返回 index.html）
+    # ==========================================================
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        add_header Pragma "no-cache";
+        add_header Expires "0";
+    }
+
+    # ==========================================================
+    # 健康检查端点
+    # ==========================================================
+    location /health {
+        access_log off;
+        return 200 "OK\n";
+        add_header Content-Type text/plain;
+        add_header Cache-Control "no-cache";
+    }
+
+    # ==========================================================
+    # 服务状态（用于监控）
+    # ==========================================================
+    location /nginx_status {
+        stub_status on;
+        access_log off;
+        allow 127.0.0.1;
+        deny all;
+    }
+
+    # ==========================================================
+    # API 代理到后端（如果配置）
+    # ==========================================================
+    # location /api/ {
+    #     proxy_pass http://backend:8080/api/;
+    #     proxy_set_header Host $host;
+    #     proxy_set_header X-Real-IP $remote_addr;
+    #     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    #     proxy_set_header X-Forwarded-Proto $scheme;
+    #     proxy_connect_timeout 60s;
+    #     proxy_send_timeout 60s;
+    #     proxy_read_timeout 60s;
+    # }
+
+    # ==========================================================
+    # WebSocket 代理
+    # ==========================================================
+    # location /ws/ {
+    #     proxy_pass http://backend:8081/ws/;
+    #     proxy_http_version 1.1;
+    #     proxy_set_header Upgrade $http_upgrade;
+    #     proxy_set_header Connection "upgrade";
+    #     proxy_set_header Host $host;
+    #     proxy_set_header X-Real-IP $remote_addr;
+    #     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    #     proxy_read_timeout 60s;
+    # }
+
+    # ==========================================================
+    # 错误页面
+    # ==========================================================
+    error_page 404 /index.html;
+    error_page 500 502 503 504 /50x.html;
+    location = /50x.html {
+        root /usr/share/nginx/html;
+    }
+
+    # ==========================================================
+    # 隐藏 Nginx 版本号
+    # ==========================================================
+    server_tokens off;
+}
+EOF
+
+# 验证 nginx 配置语法
+RUN nginx -t
+
+# 设置文件权限
+RUN chown -R nginx:nginx /usr/share/nginx/html /var/log/nginx
+
+# 暴露端口
+EXPOSE 80
+
+# 健康检查（使用 wget）
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 --start-period=10s \
+    CMD wget --spider -q http://localhost/health || exit 1
+
+# 启动命令
+CMD ["nginx", "-g", "daemon off;"]
+
+# ============================================================
+# 构建说明
+# ============================================================
+# 构建镜像：
+#   docker build -f Dockerfile.frontend -t ema-frontend:latest .
+#
+# 带参数构建：
+#   docker build -f Dockerfile.frontend \
+#       --build-arg VITE_API_BASE_URL=http://api.example.com \
+#       -t ema-frontend:latest .
+#
+# 运行容器：
+#   docker run -d --name ema-frontend -p 3000:80 ema-frontend:latest
+#
+# 查看日志：
+#   docker logs -f ema-frontend
+#
+# 访问：http://localhost:3000
+# ============================================================

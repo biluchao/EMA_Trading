@@ -1,0 +1,320 @@
+# ============================================================
+# levers.yaml — 策略调优杠杆配置文件
+# 版本：V8.4-Fixed
+# 说明：7大核心调优杠杆 + 优化规则
+# 更新频率：每月滚动前向验证调优
+# ============================================================
+#
+# 【审查与修复记录 V8.4】
+# ──────────────────────────────────────────────────────────────
+# 问题 #1：联动关系中的公式依赖可能引起循环依赖
+#   └── 修复：增加 dependency_graph 显式声明联动方向
+#
+# 问题 #2：联动公式中引用的杠杆可能不存在或已被禁用
+#   └── 修复：增加 formula_validation 配置，检查所有引用
+#
+# 问题 #3：优化约束中 max_params_per_adjustment 未考虑联动导致的连锁变化
+#   └── 修复：增加联动计数规则，联动触发的变更计入调整次数
+#
+# 问题 #4：验证条件中的回滚条件可能过于严格
+#   └── 修复：增加回滚条件阈值调整，增加 recovery_check 机制
+#
+# 问题 #5：缺少参数值超出范围时的恢复策略
+#   └── 修复：增加 out_of_range_recovery 配置
+#
+# 问题 #6：联动公式使用字符串表达式，解析时可能出错
+#   └── 修复：增加 formula_syntax 验证规则
+#
+# 问题 #7：缺少杠杆调整历史记录字段
+#   └── 修复：增加 adjustment_history 配置块
+#
+# 问题 #8：last_updated 日期固定，无法自动更新
+#   └── 修复：改为占位符 "${AUTO_DATE}"，由系统自动填充
+#
+# 问题 #9：min_samples 在低交易频率市场可能难以满足
+#   └── 修复：增加 adaptive_min_samples 根据交易频率自动调整
+#
+# 问题 #10：L4 和 L6 的联动公式可能产生无效值
+#   └── 修复：增加联动结果的范围验证
+# ──────────────────────────────────────────────────────────────
+# 兼容性：YAML 1.2
+# ============================================================
+
+# ============================================================
+# 元信息
+# ============================================================
+version: "8.4.0"
+release_date: "2026-08-19"
+update_frequency: "monthly"           # monthly | quarterly
+last_updated: "${AUTO_DATE}"          # 系统启动时自动填充当前日期
+
+# ============================================================
+# 7大核心调优杠杆
+# ============================================================
+levers:
+  # ---- L1：第3浪仓位乘数 ----
+  L1_wave3_multiplier:
+    description: "第3浪（主升浪）仓位乘数"
+    default: 1.2
+    current: 1.2
+    min: 1.0
+    max: 1.5
+    step: 0.01
+    category: "position"
+    impact: "主升浪时仓位放大系数"
+    enabled: true
+    last_adjusted: "${AUTO_DATE}"
+
+  # ---- L2：第5浪仓位乘数 ----
+  L2_wave5_multiplier:
+    description: "第5浪（末端浪）仓位乘数"
+    default: 0.7
+    current: 0.7
+    min: 0.5
+    max: 1.0
+    step: 0.01
+    category: "position"
+    impact: "末端浪时仓位缩减系数"
+    enabled: true
+    last_adjusted: "${AUTO_DATE}"
+
+  # ---- L3：Λ逃顶一级阈值 ----
+  L3_lambda_first_threshold:
+    description: "Λ逃顶一级阈值（减仓30%）"
+    default: 55
+    current: 55
+    min: 45
+    max: 70
+    step: 1
+    category: "exit"
+    impact: "逃顶灵敏度（越低越早逃顶）"
+    enabled: true
+    last_adjusted: "${AUTO_DATE}"
+
+  # ---- L4：S型曲线中心基准 ----
+  L4_sigmoid_center_base:
+    description: "S型仓位映射中心基准"
+    default: 75
+    current: 75
+    min: 70
+    max: 80
+    step: 0.5
+    category: "position"
+    impact: "仓位映射的激进程度（越高越激进）"
+    enabled: true
+    last_adjusted: "${AUTO_DATE}"
+
+  # ---- L5：混沌态仓位上限 ----
+  L5_chaos_cap:
+    description: "混沌态仓位上限"
+    default: 0.5
+    current: 0.5
+    min: 0.2
+    max: 0.8
+    step: 0.05
+    category: "risk"
+    impact: "混沌市场最大仓位限制"
+    enabled: true
+    last_adjusted: "${AUTO_DATE}"
+
+  # ---- L6：模板A突破质量权重 ----
+  L6_breakout_weight:
+    description: "模板A（突破首仓）突破质量权重"
+    default: 30
+    current: 30
+    min: 20
+    max: 40
+    step: 1
+    category: "scoring"
+    impact: "突破信号在评分中的权重"
+    enabled: true
+    last_adjusted: "${AUTO_DATE}"
+
+  # ---- L7：筑底区再进场阈值 ----
+  L7_reentry_threshold:
+    description: "筑底区再进场阈值"
+    default: 65
+    current: 65
+    min: 58
+    max: 72
+    step: 1
+    category: "entry"
+    impact: "筑底区试多门槛"
+    enabled: true
+    last_adjusted: "${AUTO_DATE}"
+
+# ============================================================
+# 杠杆依赖图（显式声明联动方向，防止循环依赖）
+# ============================================================
+dependency_graph:
+  # 节点定义
+  nodes:
+    - id: "L3"
+      lever: "L3_lambda_first_threshold"
+    - id: "L7"
+      lever: "L7_reentry_threshold"
+    - id: "L4"
+      lever: "L4_sigmoid_center_base"
+    - id: "L6"
+      lever: "L6_breakout_weight"
+  # 有向边（从依赖者到被依赖者）
+  edges:
+    - from: "L7"
+      to: "L3"
+      type: "inverse"
+      formula: "L7 = L7_base + (L3 - 55) * 0.2"
+      constraints:
+        L7_min: 58
+        L7_max: 72
+    - from: "L6"
+      to: "L4"
+      type: "inverse"
+      formula: "L6 = L6_base - (L4 - 75) * 0.5"
+      constraints:
+        L6_min: 20
+        L6_max: 40
+  # 循环依赖检测
+  cycle_detection:
+    enabled: true
+    max_iterations: 10
+
+# ============================================================
+# 联动规则验证
+# ============================================================
+formula_validation:
+  enabled: true
+  # 检查所有公式中引用的杠杆是否存在
+  check_references: true
+  # 检查公式计算结果是否在有效范围内
+  check_bounds: true
+  # 检查是否存在循环依赖
+  check_cycles: true
+  # 公式语法验证（使用安全解析器）
+  safe_eval:
+    enabled: true
+    allowed_operators: ["+", "-", "*", "/", "()", "min", "max", "clamp"]
+    max_nesting: 5
+
+# ============================================================
+# 联动规则执行
+# ============================================================
+rule_execution:
+  # 执行顺序（拓扑排序）
+  execution_order:
+    - "L3_lambda_first_threshold -> L7_reentry_threshold"
+    - "L4_sigmoid_center_base -> L6_breakout_weight"
+  # 联动触发时是否计入 max_params_per_adjustment
+  count_dependent_changes: true
+  # 联动结果范围验证
+  validate_results: true
+  # 联动结果超出范围时的处理策略
+  out_of_range_recovery:
+    strategy: "clamp_to_bounds"       # clamp_to_bounds | reject_change | use_default
+    log_warning: true
+    fallback_to_previous: false
+
+# ============================================================
+# 优化规则
+# ============================================================
+optimization:
+  # 滚动前向验证
+  walk_forward:
+    window_days: 30
+    step_days: 7
+    min_samples: 100
+    # 自适应最小样本数
+    adaptive_min_samples:
+      enabled: true
+      base: 100
+      trade_frequency_factor: 0.5     # 高频率市场降低样本要求
+      min_absolute: 30
+      max_absolute: 200
+
+  # 调优限制
+  constraints:
+    max_params_per_adjustment: 3      # 每次最多调整3个杠杆（联动触发的变更计入此数）
+    min_performance_improvement: 0.05 # 最少提升5%才更新
+    max_annual_adjustments: 12        # 每年最多调整12次
+    adjustment_cooldown_days: 7       # 调整后冷却7天
+
+  # 过拟合防护
+  overfitting_protection:
+    enabled: true
+    penalty_factor: 0.1
+    holdout_ratio: 0.2
+    min_holdout_samples: 50
+    # 如果样本不足，使用简化的验证
+    fallback_strategy: "simple_validation"
+
+  # 性能目标
+  objectives:
+    primary: "sharpe_ratio"
+    secondary: "profit_factor"
+    constraints:
+      - "max_drawdown < 0.25"
+      - "win_rate > 0.40"
+
+# ============================================================
+# 验证配置
+# ============================================================
+validation:
+  # 验证周期
+  periods: 3                         # 至少3个验证周期
+  min_trades_per_period: 20
+  # 默认值回退
+  fallback_to_default:
+    enabled: true
+    conditions:
+      - "validation_failed"
+      - "no_improvement_for_90_days"
+
+  # 显著性阈值
+  significance:
+    sharpe_improvement: 0.10         # 夏普提升至少10%
+    drawdown_increase_limit: 0.15    # 回撤增加不超过15%
+    winrate_decrease_limit: 0.05     # 胜率下降不超过5%
+    profit_factor_improvement: 0.05  # 盈亏比提升至少5%
+
+  # 回滚条件
+  rollback:
+    enabled: true
+    conditions:
+      - "sharpe_ratio < base_sharpe * 0.9"
+      - "max_drawdown > base_drawdown * 1.2"
+      - "consecutive_losses > 8"
+    # 回滚检查窗口
+    check_window_days: 30
+    # 回滚前尝试恢复
+    recovery_check:
+      enabled: true
+      attempts: 3
+      wait_days_between_attempts: 3
+
+# ============================================================
+# 杠杆调整历史
+# ============================================================
+adjustment_history:
+  enabled: true
+  max_entries: 100                   # 保留最近100条记录
+  # 存储路径（相对于 config 目录）
+  storage_path: "levers_history.json"
+  # 自动归档旧记录
+  archive:
+    enabled: true
+    threshold: 100                   # 超过100条时归档
+    archive_path: "levers_history_archive/"
+
+# ============================================================
+# 配置结束
+# ============================================================
+#
+# 使用说明：
+#   1. 复制此文件到 config/levers.yaml
+#   2. 每月通过回测验证更新杠杆值
+#   3. 每次最多调整3个杠杆（联动触发的变更计入此数）
+#   4. 调整后需满足验证条件
+#   5. 联动规则将自动调整依赖的杠杆值
+#
+# 验证命令：
+#   python3 -c "import yaml; yaml.safe_load(open('config/levers.yaml'))"
+# ============================================================
